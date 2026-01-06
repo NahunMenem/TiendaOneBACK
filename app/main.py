@@ -1468,7 +1468,7 @@ def listar_transacciones(
     hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
 
     # =========================
-    # VENTAS PRODUCTOS
+    # VENTAS CON PRODUCTO
     # =========================
     cur.execute("""
         SELECT
@@ -1477,17 +1477,8 @@ def listar_transacciones(
             p.nombre AS producto,
             p.num,
             v.cantidad,
-
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                ELSE p.precio
-            END AS precio_unitario,
-
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor * v.cantidad
-                ELSE p.precio * v.cantidad
-            END AS total,
-
+            v.precio_unitario,
+            v.total,
             v.tipo_pago,
             v.dni_cliente,
             v.tipo_precio
@@ -1508,7 +1499,7 @@ def listar_transacciones(
             id,
             fecha,
             nombre_manual AS producto,
-            NULL AS num,
+            '-' AS num,
             cantidad,
             precio_manual AS precio_unitario,
             total,
@@ -1529,6 +1520,7 @@ def listar_transacciones(
         "ventas": ventas,
         "manuales": manuales
     }
+
 
 
 
