@@ -1539,7 +1539,7 @@ def exportar_transacciones(
     desde_dt = datetime.fromisoformat(desde)
     hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
 
-    # ventas
+    # Ventas con producto
     cur.execute("""
         SELECT
             v.fecha,
@@ -1556,13 +1556,13 @@ def exportar_transacciones(
     """, (desde_dt, hasta_dt))
     ventas_df = pd.DataFrame(cur.fetchall(), columns=[c.name for c in cur.description])
 
-    # manuales
+    # Ventas manuales
     cur.execute("""
         SELECT
             fecha,
-            nombre_manual,
+            nombre_manual AS producto,
             cantidad,
-            precio_manual,
+            precio_manual AS precio_unitario,
             total,
             tipo_pago,
             dni_cliente
@@ -1574,7 +1574,6 @@ def exportar_transacciones(
 
     cur.close()
 
-    # Excel
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         ventas_df.to_excel(writer, sheet_name="Ventas", index=False)
@@ -1587,6 +1586,7 @@ def exportar_transacciones(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=transacciones.xlsx"}
     )
+
 
 from fastapi import HTTPException
 
