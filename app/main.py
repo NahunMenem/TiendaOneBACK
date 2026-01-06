@@ -563,13 +563,12 @@ def ultimas_ventas(
         SELECT 
             v.id AS venta_id,
 
-            -- Nombre del producto o manual
             COALESCE(p.nombre, v.nombre_manual) AS nombre_producto,
 
-            p.num,
+            COALESCE(p.num, '-') AS num,
+
             v.cantidad,
 
-            -- Precio unitario correcto
             COALESCE(v.precio_unitario, v.precio_manual) AS precio_unitario,
 
             v.total,
@@ -613,7 +612,7 @@ def ultimas_ventas(
                 v["venta_id"],
                 v["nombre_producto"],
                 v["cantidad"],
-                v.get("num") or "",
+                v["num"],
                 float(v["precio_unitario"] or 0),
                 float(v["total"] or 0),
                 v["fecha"].strftime("%Y-%m-%d %H:%M:%S") if v["fecha"] else "",
@@ -639,6 +638,7 @@ def ultimas_ventas(
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
     }
+
 
 # =====================================================
 # ANULAR VENTA
