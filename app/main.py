@@ -557,23 +557,16 @@ def ultimas_ventas(
     fecha_hasta = fecha_hasta or hoy
 
     # =============================
-    # VENTAS
+    # VENTAS TIENDAONE
     # =============================
     cur.execute("""
         SELECT 
             v.id AS venta_id,
-            p.nombre AS nombre_producto,
-            p.num AS num,
+            COALESCE(p.nombre, v.nombre_manual) AS nombre_producto,
+            p.num,
             v.cantidad,
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                ELSE p.precio
-            END AS precio_unitario,
-            v.cantidad *
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                ELSE p.precio
-            END AS total,
+            v.precio_unitario,
+            v.total,
             v.fecha,
             v.tipo_pago,
             v.dni_cliente,
@@ -583,39 +576,16 @@ def ultimas_ventas(
         WHERE DATE(v.fecha) BETWEEN %s AND %s
         ORDER BY v.fecha DESC
     """, (fecha_desde, fecha_hasta))
+
     ventas = cur.fetchall()
 
     # =============================
-    # REPARACIONES
-    # =============================
-    cur.execute("""
-        SELECT 
-            id AS reparacion_id,
-            nombre_servicio,
-            cantidad,
-            precio AS precio_unitario,
-            (cantidad * precio) AS total,
-            fecha,
-            tipo_pago
-        FROM reparaciones_tiendaone
-        WHERE DATE(fecha) BETWEEN %s AND %s
-        ORDER BY fecha DESC
-    """, (fecha_desde, fecha_hasta))
-    reparaciones = cur.fetchall()
-
-    # =============================
-    # TOTALES POR PAGO
+    # TOTALES POR MÉTODO DE PAGO
     # =============================
     total_ventas_por_pago = {}
     for v in ventas:
         total_ventas_por_pago[v["tipo_pago"]] = (
             total_ventas_por_pago.get(v["tipo_pago"], 0) + (v["total"] or 0)
-        )
-
-    total_reparaciones_por_pago = {}
-    for r in reparaciones:
-        total_reparaciones_por_pago[r["tipo_pago"]] = (
-            total_reparaciones_por_pago.get(r["tipo_pago"], 0) + (r["total"] or 0)
         )
 
     # =============================
@@ -638,8 +608,8 @@ def ultimas_ventas(
                 v["nombre_producto"],
                 v["cantidad"],
                 v.get("num") or "",
-                v["precio_unitario"] or 0,
-                v["total"] or 0,
+                float(v["precio_unitario"] or 0),
+                float(v["total"] or 0),
                 v["fecha"].strftime("%Y-%m-%d %H:%M:%S") if v["fecha"] else "",
                 v["tipo_pago"],
                 v["dni_cliente"] or "",
@@ -659,9 +629,7 @@ def ultimas_ventas(
 
     return {
         "ventas": ventas,
-        "reparaciones": reparaciones,
         "totales_ventas_por_pago": total_ventas_por_pago,
-        "totales_reparaciones_por_pago": total_reparaciones_por_pago,
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
     }
