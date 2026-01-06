@@ -557,15 +557,21 @@ def ultimas_ventas(
     fecha_hasta = fecha_hasta or hoy
 
     # =============================
-    # VENTAS TIENDAONE
+    # VENTAS TIENDAONE (NORMAL + MANUAL)
     # =============================
     cur.execute("""
         SELECT 
             v.id AS venta_id,
+
+            -- Nombre del producto o manual
             COALESCE(p.nombre, v.nombre_manual) AS nombre_producto,
+
             p.num,
             v.cantidad,
-            v.precio_unitario,
+
+            -- Precio unitario correcto
+            COALESCE(v.precio_unitario, v.precio_manual) AS precio_unitario,
+
             v.total,
             v.fecha,
             v.tipo_pago,
