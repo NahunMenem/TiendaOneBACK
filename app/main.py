@@ -98,7 +98,7 @@ def crear_tabla_equipos():
     conn = psycopg2.connect(os.getenv("DATABASE_URL"), cursor_factory=DictCursor, sslmode="require")
     cur = conn.cursor()
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS equipos_sj (
+        CREATE TABLE IF NOT EXISTS equipos_tiendaone (
             id SERIAL PRIMARY KEY,
             tipo_reparacion TEXT NOT NULL,
             marca TEXT NOT NULL,
@@ -176,7 +176,7 @@ def agregar_carrito(data: dict, request: Request, db=Depends(get_db)):
     cur = db.cursor(cursor_factory=DictCursor)
     cur.execute("""
         SELECT id, nombre, stock, precio, precio_revendedor
-        FROM productos_sj
+        FROM productos_tiendaone
         WHERE id = %s
     """, (producto_id,))
     producto = cur.fetchone()
@@ -320,7 +320,7 @@ async def registrar_venta(
                 ))
 
                 cur.execute("""
-                    UPDATE productos_sj
+                    UPDATE productos_tiendaone
                     SET stock = stock - %s
                     WHERE id = %s
                 """, (cantidad, producto_id))
@@ -352,7 +352,7 @@ def precios_actualizados(tipo_precio: str = "venta", request: Request = None, db
     for item in carrito:
         if item["id"]:
             cur.execute(
-                "SELECT precio, precio_revendedor FROM productos_sj WHERE id=%s",
+                "SELECT precio, precio_revendedor FROM productos_tiendaone WHERE id=%s",
                 (item["id"],),
             )
             p = cur.fetchone()
@@ -382,7 +382,7 @@ def productos_mas_vendidos(db=Depends(get_db)):
     # Total general de unidades vendidas
     cur.execute("""
         SELECT COALESCE(SUM(cantidad), 0) AS total
-        FROM ventas_sj
+        FROM ventas_tiendaone
         WHERE producto_id IS NOT NULL
     """)
     total = cur.fetchone()["total"]
@@ -393,8 +393,8 @@ def productos_mas_vendidos(db=Depends(get_db)):
             p.nombre,
             p.precio,
             SUM(v.cantidad) AS unidades
-        FROM ventas_sj v
-        JOIN productos_sj p ON p.id = v.producto_id
+        FROM ventas_tiendaone v
+        JOIN productos_tiendaone p ON p.id = v.producto_id
         WHERE v.producto_id IS NOT NULL
         GROUP BY p.id, p.nombre, p.precio
         ORDER BY unidades DESC
@@ -427,7 +427,7 @@ def productos_mas_vendidos_detalle(db=Depends(get_db)):
     # Total general
     cur.execute("""
         SELECT COALESCE(SUM(cantidad), 0) AS total
-        FROM ventas_sj
+        FROM ventas_tiendaone
         WHERE producto_id IS NOT NULL
     """)
     total_ventas = cur.fetchone()["total"]
@@ -438,8 +438,8 @@ def productos_mas_vendidos_detalle(db=Depends(get_db)):
             p.nombre,
             p.precio,
             SUM(v.cantidad) AS unidades
-        FROM ventas_sj v
-        JOIN productos_sj p ON p.id = v.producto_id
+        FROM ventas_tiendaone v
+        JOIN productos_tiendaone p ON p.id = v.producto_id
         WHERE v.producto_id IS NOT NULL
         GROUP BY p.id, p.nombre, p.precio
         ORDER BY unidades DESC
@@ -484,7 +484,7 @@ def productos_por_agotarse(
     # Total para paginación
     cur.execute("""
         SELECT COUNT(*) AS total
-        FROM productos_sj
+        FROM productos_tiendaone
         WHERE stock <= 30
     """)
     total = cur.fetchone()["total"]
@@ -492,7 +492,7 @@ def productos_por_agotarse(
     # Datos paginados
     cur.execute("""
         SELECT id, nombre, codigo_barras, stock, precio, precio_costo
-        FROM productos_sj
+        FROM productos_tiendaone
         WHERE stock <= 30
         ORDER BY stock ASC
         LIMIT %s OFFSET %s
@@ -526,7 +526,7 @@ def buscar_productos(busqueda: str, db=Depends(get_db)):
     cur = db.cursor(cursor_factory=DictCursor)
     cur.execute("""
         SELECT id, nombre, codigo_barras, num, stock, precio, precio_revendedor
-        FROM productos_sj
+        FROM productos_tiendaone
         WHERE codigo_barras = %s
            OR nombre ILIKE %s
            OR num ILIKE %s
@@ -578,8 +578,8 @@ def ultimas_ventas(
             v.tipo_pago,
             v.dni_cliente,
             v.tipo_precio
-        FROM ventas_sj v
-        LEFT JOIN productos_sj p ON v.producto_id = p.id
+        FROM ventas_tiendaone v
+        LEFT JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
         ORDER BY v.fecha DESC
     """, (fecha_desde, fecha_hasta))
@@ -597,7 +597,7 @@ def ultimas_ventas(
             (cantidad * precio) AS total,
             fecha,
             tipo_pago
-        FROM reparaciones_sj
+        FROM reparaciones_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
         ORDER BY fecha DESC
     """, (fecha_desde, fecha_hasta))
@@ -674,11 +674,11 @@ def ultimas_ventas(
 def anular_venta(venta_id: int, db=Depends(get_db)):
     cur = db.cursor()
 
-    cur.execute("SELECT id FROM ventas_sj WHERE id=%s", (venta_id,))
+    cur.execute("SELECT id FROM ventas_tiendaone WHERE id=%s", (venta_id,))
     if not cur.fetchone():
         raise HTTPException(status_code=404, detail="Venta no encontrada")
 
-    cur.execute("DELETE FROM ventas_sj WHERE id=%s", (venta_id,))
+    cur.execute("DELETE FROM ventas_tiendaone WHERE id=%s", (venta_id,))
     db.commit()
 
     return {"success": True}
@@ -691,11 +691,11 @@ def anular_venta(venta_id: int, db=Depends(get_db)):
 def anular_reparacion(reparacion_id: int, db=Depends(get_db)):
     cur = db.cursor()
 
-    cur.execute("SELECT id FROM reparaciones_sj WHERE id=%s", (reparacion_id,))
+    cur.execute("SELECT id FROM reparaciones_tiendaone WHERE id=%s", (reparacion_id,))
     if not cur.fetchone():
         raise HTTPException(status_code=404, detail="Reparación no encontrada")
 
-    cur.execute("DELETE FROM reparaciones_sj WHERE id=%s", (reparacion_id,))
+    cur.execute("DELETE FROM reparaciones_tiendaone WHERE id=%s", (reparacion_id,))
     db.commit()
 
     return {"success": True}
@@ -717,7 +717,7 @@ def listar_egresos(
     if fecha_desde and fecha_hasta:
         cur.execute("""
             SELECT id, fecha, monto, descripcion, tipo_pago
-            FROM egresos_sj
+            FROM egresos_tiendaone
             WHERE fecha BETWEEN %s AND %s
             ORDER BY fecha DESC
         """, (
@@ -727,7 +727,7 @@ def listar_egresos(
     else:
         cur.execute("""
             SELECT id, fecha, monto, descripcion, tipo_pago
-            FROM egresos_sj
+            FROM egresos_tiendaone
             ORDER BY fecha DESC
         """)
 
@@ -763,7 +763,7 @@ def agregar_egreso(data: dict, db=Depends(get_db)):
 @app.delete("/egresos/{egreso_id}")
 def eliminar_egreso(egreso_id: int, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM egresos_sj WHERE id=%s", (egreso_id,))
+    cur.execute("DELETE FROM egresos_tiendaone WHERE id=%s", (egreso_id,))
     db.commit()
     return {"ok": True}
 
@@ -794,8 +794,8 @@ def dashboard(
                 ELSE p.precio
             END
         ) AS total
-        FROM ventas_sj v
-        LEFT JOIN productos_sj p ON v.producto_id = p.id
+        FROM ventas_tiendaone v
+        LEFT JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     total_ventas_productos = cur.fetchone()["total"] or 0
@@ -805,7 +805,7 @@ def dashboard(
     # -----------------------------------------
     cur.execute("""
         SELECT SUM(precio) AS total
-        FROM reparaciones_sj
+        FROM reparaciones_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     total_ventas_reparaciones = cur.fetchone()["total"] or 0
@@ -817,7 +817,7 @@ def dashboard(
     # -----------------------------------------
     cur.execute("""
         SELECT SUM(monto) AS total
-        FROM egresos_sj
+        FROM egresos_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     total_egresos = cur.fetchone()["total"] or 0
@@ -827,8 +827,8 @@ def dashboard(
     # -----------------------------------------
     cur.execute("""
         SELECT SUM(v.cantidad * p.precio_costo) AS total
-        FROM ventas_sj v
-        JOIN productos_sj p ON v.producto_id = p.id
+        FROM ventas_tiendaone v
+        JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     total_costo = cur.fetchone()["total"] or 0
@@ -846,14 +846,14 @@ def dashboard(
                 ELSE p.precio
             END
         ) AS total
-        FROM ventas_sj v
-        LEFT JOIN productos_sj p ON v.producto_id = p.id
+        FROM ventas_tiendaone v
+        LEFT JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
 
         UNION ALL
 
         SELECT 'Reparaciones' AS tipo, SUM(precio)
-        FROM reparaciones_sj
+        FROM reparaciones_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta, fecha_desde, fecha_hasta))
 
@@ -887,7 +887,7 @@ def resumen_semanal(db=Depends(get_db)):
     cur = db.cursor()
     cur.execute("""
         SELECT tipo_pago, SUM(total) AS total
-        FROM ventas_sj
+        FROM ventas_tiendaone
         WHERE fecha >= %s
         GROUP BY tipo_pago
     """, (inicio_semana_str,))
@@ -931,8 +931,8 @@ def caja(
                 WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
                 ELSE p.precio
             END) AS total
-        FROM ventas_sj v
-        JOIN productos_sj p ON v.producto_id = p.id
+        FROM ventas_tiendaone v
+        JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     ventas = cur.fetchall()
@@ -942,7 +942,7 @@ def caja(
     # ------------------------
     cur.execute("""
         SELECT tipo_pago, (cantidad * precio) AS total
-        FROM reparaciones_sj
+        FROM reparaciones_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     reparaciones = cur.fetchall()
@@ -952,7 +952,7 @@ def caja(
     # ------------------------
     cur.execute("""
         SELECT tipo_pago, monto
-        FROM egresos_sj
+        FROM egresos_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
     egresos = cur.fetchall()
@@ -1001,7 +1001,7 @@ def listar_reparaciones(
 
     # Últimos equipos
     cur.execute("""
-        SELECT * FROM equipos_sj
+        SELECT * FROM equipos_tiendaone
         WHERE fecha BETWEEN %s AND %s
         ORDER BY nro_orden DESC
     """, (fecha_desde, fecha_hasta))
@@ -1010,7 +1010,7 @@ def listar_reparaciones(
     # Por técnico
     cur.execute("""
         SELECT tecnico, COUNT(*) AS cantidad
-        FROM equipos_sj
+        FROM equipos_tiendaone
         WHERE fecha BETWEEN %s AND %s
         GROUP BY tecnico
     """, (fecha_desde, fecha_hasta))
@@ -1019,7 +1019,7 @@ def listar_reparaciones(
     # Por estado
     cur.execute("""
         SELECT estado, COUNT(*) AS cantidad
-        FROM equipos_sj
+        FROM equipos_tiendaone
         WHERE fecha BETWEEN %s AND %s
         GROUP BY estado
     """, (fecha_desde, fecha_hasta))
@@ -1066,7 +1066,7 @@ def listar_reparaciones(
 @app.delete("/reparaciones/{id}")
 def eliminar_reparacion(id: int, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM equipos_sj WHERE id = %s", (id,))
+    cur.execute("DELETE FROM equipos_tiendaone WHERE id = %s", (id,))
     db.commit()
     return {"success": True}
 
@@ -1081,7 +1081,7 @@ def actualizar_estado(data: dict, db=Depends(get_db)):
 
     cur = db.cursor()
     cur.execute("""
-        UPDATE equipos_sj
+        UPDATE equipos_tiendaone
         SET estado = %s
         WHERE nro_orden = %s
     """, (estado, nro_orden))
@@ -1099,7 +1099,7 @@ def listar_mercaderia_fallada(db=Depends(get_db)):
     cur.execute("""
         SELECT mf.id, p.nombre, mf.cantidad, mf.fecha, mf.descripcion
         FROM mercaderia_fallada mf
-        JOIN productos_sj p ON mf.producto_id = p.id
+        JOIN productos_tiendaone p ON mf.producto_id = p.id
         ORDER BY mf.fecha DESC
     """)
     return cur.fetchall()
@@ -1113,7 +1113,7 @@ def registrar_mercaderia_fallada(data: dict, db=Depends(get_db)):
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     cur = db.cursor()
-    cur.execute("SELECT stock FROM productos_sj WHERE id=%s", (producto_id,))
+    cur.execute("SELECT stock FROM productos_tiendaone WHERE id=%s", (producto_id,))
     prod = cur.fetchone()
 
     if not prod or prod["stock"] < cantidad:
@@ -1125,7 +1125,7 @@ def registrar_mercaderia_fallada(data: dict, db=Depends(get_db)):
     """, (producto_id, cantidad, fecha, descripcion))
 
     cur.execute("""
-        UPDATE productos_sj
+        UPDATE productos_tiendaone
         SET stock = stock - %s
         WHERE id = %s
     """, (cantidad, producto_id))
@@ -1141,7 +1141,7 @@ def crear_tabla_categorias():
     conn = psycopg2.connect(os.getenv("DATABASE_URL"), cursor_factory=DictCursor, sslmode="require")
     cur = conn.cursor()
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS categorias_sj (
+        CREATE TABLE IF NOT EXISTS categorias_tiendaone (
             id SERIAL PRIMARY KEY,
             nombre TEXT UNIQUE NOT NULL
         )
@@ -1155,7 +1155,7 @@ crear_tabla_categorias()
 @app.get("/categorias")
 def listar_categorias(db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("SELECT nombre FROM categorias_sj ORDER BY nombre")
+    cur.execute("SELECT nombre FROM categorias_tiendaone ORDER BY nombre")
     return [r["nombre"] for r in cur.fetchall()]
 
 
@@ -1173,7 +1173,7 @@ def agregar_categoria(data: dict, db=Depends(get_db)):
 @app.delete("/categorias/{nombre}")
 def eliminar_categoria(nombre: str, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM categorias_sj WHERE nombre=%s", (nombre,))
+    cur.execute("DELETE FROM categorias_tiendaone WHERE nombre=%s", (nombre,))
     db.commit()
     return {"ok": True}
 
@@ -1194,7 +1194,7 @@ def listar_productos(
     if busqueda:
         cur.execute("""
             SELECT *
-            FROM productos_sj
+            FROM productos_tiendaone
             WHERE nombre ILIKE %s
                OR codigo_barras ILIKE %s
                OR num ILIKE %s
@@ -1210,7 +1210,7 @@ def listar_productos(
     else:
         cur.execute("""
             SELECT *
-            FROM productos_sj
+            FROM productos_tiendaone
             ORDER BY id DESC
             LIMIT %s OFFSET %s
         """, (limit, offset))
@@ -1218,7 +1218,7 @@ def listar_productos(
     rows = cur.fetchall()
 
     # total (para paginación)
-    cur.execute("SELECT COUNT(*) FROM productos_sj")
+    cur.execute("SELECT COUNT(*) FROM productos_tiendaone")
     total = cur.fetchone()[0]
 
     return {
@@ -1315,7 +1315,7 @@ def agregar_producto(data: dict, db=Depends(get_db)):
 def editar_producto(id: int, data: dict, db=Depends(get_db)):
     cur = db.cursor()
     cur.execute("""
-        UPDATE productos_sj
+        UPDATE productos_tiendaone
         SET nombre=%s, codigo_barras=%s, stock=%s, precio=%s, precio_costo=%s,
             categoria=%s, num=%s, color=%s, bateria=%s, precio_revendedor=%s, condicion=%s
         WHERE id=%s
@@ -1340,7 +1340,7 @@ def editar_producto(id: int, data: dict, db=Depends(get_db)):
 @app.delete("/productos/{id}")
 def eliminar_producto(id: int, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM productos_sj WHERE id=%s", (id,))
+    cur.execute("DELETE FROM productos_tiendaone WHERE id=%s", (id,))
     db.commit()
     return {"ok": True}
 
@@ -1369,7 +1369,7 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
                 bateria,
                 condicion,
                 precio_revendedor
-            FROM productos_sj
+            FROM productos_tiendaone
             WHERE categoria=%s
               AND foto_url IS NOT NULL
               AND stock > 0
@@ -1388,7 +1388,7 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
                 bateria,
                 condicion,
                 precio_revendedor
-            FROM productos_sj
+            FROM productos_tiendaone
             WHERE foto_url IS NOT NULL
               AND stock > 0
             ORDER BY nombre
@@ -1414,7 +1414,7 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
 
     cur.execute("""
         SELECT DISTINCT categoria
-        FROM productos_sj
+        FROM productos_tiendaone
         WHERE categoria IS NOT NULL
         ORDER BY categoria
     """)
@@ -1440,7 +1440,7 @@ def exportar_stock(db=Depends(get_db)):
     cur.execute("""
         SELECT id, nombre, codigo_barras, num, color, bateria,
                condicion, stock, precio, precio_costo, precio_revendedor
-        FROM productos_sj
+        FROM productos_tiendaone
         ORDER BY nombre
     """)
     productos = cur.fetchall()
@@ -1517,8 +1517,8 @@ def listar_transacciones(
             v.tipo_pago,
             v.dni_cliente,
             v.tipo_precio
-        FROM ventas_sj v
-        JOIN productos_sj p ON p.id = v.producto_id
+        FROM ventas_tiendaone v
+        JOIN productos_tiendaone p ON p.id = v.producto_id
         WHERE v.producto_id IS NOT NULL
         AND v.fecha BETWEEN %s AND %s
         ORDER BY v.fecha DESC
@@ -1541,7 +1541,7 @@ def listar_transacciones(
             tipo_pago,
             dni_cliente,
             tipo_precio
-        FROM ventas_sj
+        FROM ventas_tiendaone
         WHERE producto_id IS NULL
         AND fecha BETWEEN %s AND %s
         ORDER BY fecha DESC
@@ -1583,8 +1583,8 @@ def exportar_transacciones(
             v.total,
             v.tipo_pago,
             v.dni_cliente
-        FROM ventas_sj v
-        JOIN productos_sj p ON p.id = v.producto_id
+        FROM ventas_tiendaone v
+        JOIN productos_tiendaone p ON p.id = v.producto_id
         WHERE v.producto_id IS NOT NULL
         AND v.fecha BETWEEN %s AND %s
     """, (desde_dt, hasta_dt))
@@ -1600,7 +1600,7 @@ def exportar_transacciones(
             total,
             tipo_pago,
             dni_cliente
-        FROM ventas_sj
+        FROM ventas_tiendaone
         WHERE producto_id IS NULL
         AND fecha BETWEEN %s AND %s
     """, (desde_dt, hasta_dt))
@@ -1639,7 +1639,7 @@ def eliminar_transaccion(
             id,
             producto_id,
             cantidad
-        FROM ventas_sj
+        FROM ventas_tiendaone
         WHERE id = %s
     """, (venta_id,))
 
@@ -1653,14 +1653,14 @@ def eliminar_transaccion(
         # 👉 Si es producto, devolver stock
         if venta["producto_id"] is not None:
             cur.execute("""
-                UPDATE productos_sj
+                UPDATE productos_tiendaone
                 SET stock = stock + %s
                 WHERE id = %s
             """, (venta["cantidad"], venta["producto_id"]))
 
         # 👉 Eliminar transacción
         cur.execute("""
-            DELETE FROM ventas_sj
+            DELETE FROM ventas_tiendaone
             WHERE id = %s
         """, (venta_id,))
 
