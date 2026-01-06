@@ -892,60 +892,75 @@ def caja(
     fecha_desde = fecha_desde or hoy.strftime("%Y-%m-%d")
     fecha_hasta = fecha_hasta or hoy.strftime("%Y-%m-%d")
 
+    # 🔹 rango horario correcto
+    desde_dt = datetime.fromisoformat(fecha_desde)
+    hasta_dt = datetime.fromisoformat(fecha_hasta) + timedelta(days=1)
+
     cur = db.cursor()
 
     # ------------------------
-    # Ventas
+    # VENTAS (producto + manuales)
     # ------------------------
     cur.execute("""
-        SELECT 
-            v.tipo_pago,
-            (v.cantidad *
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                ELSE p.precio
-            END) AS total
-        FROM ventas_tiendaone v
-        JOIN productos_tiendaone p ON v.producto_id = p.id
-        WHERE DATE(v.fecha) BETWEEN %s AND %s
-    """, (fecha_desde, fecha_hasta))
+        SELECT
+            tipo_pago,
+            SUM(total) AS total
+        FROM ventas_tiendaone
+        WHERE fecha BETWEEN %s AND %s
+        GROUP BY tipo_pago
+    """, (desde_dt, hasta_dt))
     ventas = cur.fetchall()
 
     # ------------------------
-    # Reparaciones
+    # REPARACIONES
     # ------------------------
     cur.execute("""
-        SELECT tipo_pago, (cantidad * precio) AS total
+        SELECT
+            tipo_pago,
+            SUM(cantidad * precio) AS total
         FROM reparaciones_tiendaone
-        WHERE DATE(fecha) BETWEEN %s AND %s
-    """, (fecha_desde, fecha_hasta))
+        WHERE fecha BETWEEN %s AND %s
+        GROUP BY tipo_pago
+    """, (desde_dt, hasta_dt))
     reparaciones = cur.fetchall()
 
     # ------------------------
-    # Egresos
+    # EGRESOS
     # ------------------------
     cur.execute("""
-        SELECT tipo_pago, monto
+        SELECT
+            tipo_pago,
+            SUM(monto) AS total
         FROM egresos_tiendaone
-        WHERE DATE(fecha) BETWEEN %s AND %s
-    """, (fecha_desde, fecha_hasta))
+        WHERE fecha BETWEEN %s AND %s
+        GROUP BY tipo_pago
+    """, (desde_dt, hasta_dt))
     egresos = cur.fetchall()
 
+    # ------------------------
+    # CONSOLIDACIÓN
+    # ------------------------
     total_por_pago = {}
 
     for v in ventas:
-        total_por_pago[v["tipo_pago"]] = total_por_pago.get(v["tipo_pago"], 0) + v["total"]
+        total_por_pago[v["tipo_pago"]] = float(v["total"] or 0)
 
     for r in reparaciones:
-        total_por_pago[r["tipo_pago"]] = total_por_pago.get(r["tipo_pago"], 0) + r["total"]
+        total_por_pago[r["tipo_pago"]] = (
+            total_por_pago.get(r["tipo_pago"], 0) + float(r["total"] or 0)
+        )
 
-    egresos_por_pago = {}
-    for e in egresos:
-        egresos_por_pago[e["tipo_pago"]] = egresos_por_pago.get(e["tipo_pago"], 0) + e["monto"]
+    egresos_por_pago = {
+        e["tipo_pago"]: float(e["total"] or 0)
+        for e in egresos
+    }
 
-    neto_por_pago = {}
-    for tipo_pago, total in total_por_pago.items():
-        neto_por_pago[tipo_pago] = total - egresos_por_pago.get(tipo_pago, 0)
+    neto_por_pago = {
+        tipo: total - egresos_por_pago.get(tipo, 0)
+        for tipo, total in total_por_pago.items()
+    }
+
+    cur.close()
 
     return {
         "fecha_desde": fecha_desde,
