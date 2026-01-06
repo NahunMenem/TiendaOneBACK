@@ -34,21 +34,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 import os
 
-app = FastAPI(title="Backend SJ")
-
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Backend SJ")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "https://chiphone-3-front.vercel.app",  # ✅ PRODUCCIÓN
+        "http://localhost:3000",                 # desarrollo
+        "https://tienda-one-ten.vercel.app",     # producción
     ],
-    allow_origin_regex=r"https://chiphone-3-front-.*\.vercel\.app",  # ✅ PREVIEWS
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 
