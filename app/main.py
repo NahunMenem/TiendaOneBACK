@@ -1489,7 +1489,7 @@ def exportar_stock(db=Depends(get_db)):
     )
 
 
-from fastapi import Depends, Query
+from fastapi import Query, Depends
 from datetime import datetime, timedelta
 
 @app.get("/transacciones")
@@ -1514,7 +1514,7 @@ def listar_transacciones(
             p.num,
             v.cantidad,
             v.precio_unitario,
-            v.total,
+            COALESCE(v.total, 0) AS total,
             v.tipo_pago,
             v.dni_cliente,
             v.tipo_precio
@@ -1538,7 +1538,7 @@ def listar_transacciones(
             '-' AS num,
             cantidad,
             precio_manual AS precio_unitario,
-            total,
+            COALESCE(total, 0) AS total,
             tipo_pago,
             dni_cliente,
             tipo_precio
@@ -1556,6 +1556,7 @@ def listar_transacciones(
         "ventas": ventas,
         "manuales": manuales
     }
+
 
 
 
