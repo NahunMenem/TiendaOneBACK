@@ -1169,6 +1169,17 @@ def eliminar_categoria(nombre: str, db=Depends(get_db)):
 # =====================================================
 # PRODUCTOS / STOCK
 # =====================================================
+@app.delete("/productos/{id}")
+def eliminar_producto(id: int, db=Depends(get_db)):
+    try:
+        cur = db.cursor()
+        cur.execute("DELETE FROM productos_tiendaone WHERE id = %s", (id,))
+        db.commit()
+        return {"ok": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/productos")
 def listar_productos(
