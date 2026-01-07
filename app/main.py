@@ -1302,36 +1302,46 @@ def agregar_producto(data: dict, db=Depends(get_db)):
 
 @app.put("/productos/{id}")
 def editar_producto(id: int, data: dict, db=Depends(get_db)):
-    cur = db.cursor()
-    cur.execute("""
-        UPDATE productos_tiendaone
-        SET nombre=%s, codigo_barras=%s, stock=%s, precio=%s, precio_costo=%s,
-            categoria=%s, num=%s, color=%s, bateria=%s, precio_revendedor=%s, condicion=%s
-        WHERE id=%s
-    """, (
-        data["nombre"].upper(),
-        data["codigo_barras"],
-        int(data["stock"]),
-        float(data["precio"]),
-        float(data["precio_costo"]),
-        data.get("categoria"),
-        data.get("num"),
-        data.get("color"),
-        data.get("bateria"),
-        data.get("precio_revendedor"),
-        data.get("condicion"),
-        id,
-    ))
-    db.commit()
-    return {"ok": True}
+    try:
+        cur = db.cursor()
 
+        cur.execute("""
+            UPDATE productos_tiendaone
+            SET nombre=%s,
+                codigo_barras=%s,
+                stock=%s,
+                precio=%s,
+                precio_costo=%s,
+                foto_url=%s,
+                categoria=%s,
+                num=%s,
+                color=%s,
+                bateria=%s,
+                precio_revendedor=%s,
+                condicion=%s
+            WHERE id=%s
+        """, (
+            data["nombre"].upper(),
+            data["codigo_barras"],
+            int(data["stock"]),
+            float(data["precio"]),
+            float(data["precio_costo"]),
+            data.get("foto_url"),        # ✅ CLAVE
+            data.get("categoria"),
+            data.get("num"),
+            data.get("color"),
+            data.get("bateria"),
+            data.get("precio_revendedor"),
+            data.get("condicion"),
+            id,
+        ))
 
-@app.delete("/productos/{id}")
-def eliminar_producto(id: int, db=Depends(get_db)):
-    cur = db.cursor()
-    cur.execute("DELETE FROM productos_tiendaone WHERE id=%s", (id,))
-    db.commit()
-    return {"ok": True}
+        db.commit()
+        return {"ok": True}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =====================================================
 # TIENDA (PÚBLICA)
