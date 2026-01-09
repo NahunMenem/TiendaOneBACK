@@ -288,7 +288,7 @@ from datetime import datetime
 @app.post("/ventas/registrar")
 async def registrar_venta(
     request: Request,
-    db = Depends(get_db)
+    db=Depends(get_db)
 ):
     data = await request.json()
 
@@ -297,10 +297,13 @@ async def registrar_venta(
         raise HTTPException(status_code=400, detail="Carrito vacío")
 
     dni_cliente = data.get("dni_cliente")
-    tipo_pago = data.get("metodo_pago")
+    pagos = data.get("pagos", [])
 
-    if not tipo_pago:
-        raise HTTPException(status_code=400, detail="Falta método de pago")
+    if not dni_cliente:
+        raise HTTPException(status_code=400, detail="Falta DNI del cliente")
+
+    if not pagos:
+        raise HTTPException(status_code=400, detail="Debe registrar al menos un pago")
 
     cur = db.cursor()
     fecha_actual = datetime.now()
@@ -311,93 +314,91 @@ async def registrar_venta(
             cantidad = int(item["cantidad"])
             tipo_precio = item.get("tipo_precio")
 
-            # =========================
-            # 👉 VENTA MANUAL
-            # =========================
-            if producto_id is None:
-                nombre_manual = item["nombre"]
-                precio_manual = float(item["precio"])
-                moneda = item.get("moneda", "ARS")   # 👈 VIENE DEL FRONT
+            for pago in pagos:
+                metodo_pago = pago["metodo"]
+                moneda_pago = pago["moneda"]
+                monto_pago = float(pago["monto"])
 
-                if moneda not in ("ARS", "USD"):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Moneda inválida en venta manual"
-                    )
+                if monto_pago <= 0:
+                    continue
 
-                total = precio_manual * cantidad
+                # =========================
+                # 👉 VENTA MANUAL
+                # =========================
+                if producto_id is None:
+                    nombre_manual = item["nombre"]
+                    precio_manual = float(item["precio"])
+                    moneda_item = item.get("moneda", "ARS")
 
-                cur.execute("""
-                    INSERT INTO ventas_tiendaone (
-                        producto_id,
+                    total = precio_manual * cantidad
+
+                    cur.execute("""
+                        INSERT INTO ventas_tiendaone (
+                            producto_id,
+                            cantidad,
+                            fecha,
+                            nombre_manual,
+                            precio_manual,
+                            moneda,
+                            tipo_pago,
+                            dni_cliente,
+                            total,
+                            tipo_precio
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        None,
                         cantidad,
-                        fecha,
+                        fecha_actual,
                         nombre_manual,
                         precio_manual,
-                        moneda,
-                        tipo_pago,
+                        moneda_item,
+                        metodo_pago,
                         dni_cliente,
                         total,
                         tipo_precio
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    None,
-                    cantidad,
-                    fecha_actual,
-                    nombre_manual,
-                    precio_manual,
-                    moneda,
-                    tipo_pago,
-                    dni_cliente,
-                    total,
-                    tipo_precio
-                ))
+                    ))
 
-            # =========================
-            # 👉 PRODUCTO NORMAL
-            # =========================
-            else:
-                precio_unitario = float(item["precio"])
-                moneda = item["moneda"]              # 👈 VIENE DEL PRODUCTO
-                total = precio_unitario * cantidad
+                # =========================
+                # 👉 PRODUCTO NORMAL
+                # =========================
+                else:
+                    precio_unitario = float(item["precio"])
+                    moneda_item = item["moneda"]
+                    total = precio_unitario * cantidad
 
-                cur.execute("""
-                    INSERT INTO ventas_tiendaone (
+                    cur.execute("""
+                        INSERT INTO ventas_tiendaone (
+                            producto_id,
+                            cantidad,
+                            fecha,
+                            precio_unitario,
+                            moneda,
+                            tipo_pago,
+                            dni_cliente,
+                            total,
+                            tipo_precio
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
                         producto_id,
                         cantidad,
-                        fecha,
+                        fecha_actual,
                         precio_unitario,
-                        moneda,
-                        tipo_pago,
+                        moneda_item,
+                        metodo_pago,
                         dni_cliente,
                         total,
                         tipo_precio
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    producto_id,
-                    cantidad,
-                    fecha_actual,
-                    precio_unitario,
-                    moneda,
-                    tipo_pago,
-                    dni_cliente,
-                    total,
-                    tipo_precio
-                ))
+                    ))
 
-                cur.execute("""
-                    UPDATE productos_tiendaone
-                    SET stock = stock - %s
-                    WHERE id = %s
-                """, (cantidad, producto_id))
+                    cur.execute("""
+                        UPDATE productos_tiendaone
+                        SET stock = stock - %s
+                        WHERE id = %s
+                    """, (cantidad, producto_id))
 
         db.commit()
         request.session["carrito"] = []
         return {"ok": True}
-
-    except HTTPException:
-        db.rollback()
-        raise
 
     except Exception as e:
         db.rollback()
