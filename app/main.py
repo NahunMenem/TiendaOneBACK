@@ -167,6 +167,11 @@ def me(username=Depends(require_login), request: Request = None):
 from fastapi import Depends, Request, HTTPException
 from psycopg2.extras import DictCursor
 
+@app.post("/carrito/limpiar")
+def limpiar_carrito(request: Request):
+    request.session["carrito"] = []
+    return {"ok": True}
+
 @app.post("/carrito/agregar")
 def agregar_carrito(data: dict, request: Request, db=Depends(get_db)):
     if "carrito" not in request.session:
