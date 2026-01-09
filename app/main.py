@@ -164,6 +164,9 @@ def me(username=Depends(require_login), request: Request = None):
 # CARRITO
 # =====================================================
 
+from fastapi import Depends, Request, HTTPException
+from psycopg2.extras import DictCursor
+
 @app.post("/carrito/agregar")
 def agregar_carrito(data: dict, request: Request, db=Depends(get_db)):
     if "carrito" not in request.session:
@@ -175,17 +178,23 @@ def agregar_carrito(data: dict, request: Request, db=Depends(get_db)):
 
     cur = db.cursor(cursor_factory=DictCursor)
     cur.execute("""
-        SELECT id, nombre, stock, precio, precio_revendedor
+        SELECT
+            id,
+            nombre,
+            stock,
+            precio,
+            precio_revendedor,
+            moneda
         FROM productos_tiendaone
         WHERE id = %s
     """, (producto_id,))
     producto = cur.fetchone()
 
     if not producto:
-        raise HTTPException(404, "Producto no encontrado")
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
 
     if producto["stock"] < cantidad:
-        raise HTTPException(400, "Stock insuficiente")
+        raise HTTPException(status_code=400, detail="Stock insuficiente")
 
     precio_usado = (
         float(producto["precio_revendedor"])
@@ -198,27 +207,41 @@ def agregar_carrito(data: dict, request: Request, db=Depends(get_db)):
         "nombre": producto["nombre"],
         "precio": precio_usado,
         "cantidad": cantidad,
-        "tipo_precio": tipo_precio
+        "tipo_precio": tipo_precio,
+        "moneda": producto["moneda"],   # 👈 CLAVE
     })
 
+    cur.close()
     return {"ok": True}
 
 
+
+
+from fastapi import Request, HTTPException
 
 @app.post("/carrito/agregar-manual")
 def agregar_manual(data: dict, request: Request):
     if "carrito" not in request.session:
         request.session["carrito"] = []
 
+    moneda = data.get("moneda", "ARS")
+    if moneda not in ("ARS", "USD"):
+        raise HTTPException(
+            status_code=400,
+            detail="Moneda inválida. Use ARS o USD"
+        )
+
     request.session["carrito"].append({
         "id": None,
         "nombre": data["nombre"],
         "precio": float(data["precio"]),
         "cantidad": int(data["cantidad"]),
-        "tipo_precio": "manual"
+        "tipo_precio": "manual",
+        "moneda": moneda,   # 👈 CLAVE
     })
 
     return {"ok": True}
+
 
 
 @app.post("/carrito/vaciar")
@@ -227,13 +250,39 @@ def vaciar_carrito(request: Request):
     return {"ok": True}
 
 
+from fastapi import Request
+
 @app.get("/carrito")
 def ver_carrito(request: Request):
     carrito = request.session.get("carrito", [])
-    total = sum(i["precio"] * i["cantidad"] for i in carrito)
-    return {"items": carrito, "total": total}
+
+    total = 0            # 👈 se mantiene para compatibilidad
+    total_ars = 0
+    total_usd = 0
+
+    for i in carrito:
+        subtotal = i["precio"] * i["cantidad"]
+        total += subtotal
+
+        if i.get("moneda") == "USD":
+            total_usd += subtotal
+        else:
+            total_ars += subtotal
+
+    return {
+        "items": carrito,
+        "total": total,              # 👈 NO se rompe nada existente
+        "totales": {                 # 👈 nuevo, correcto
+            "ARS": total_ars,
+            "USD": total_usd
+        }
+    }
+
 
 from fastapi import Request, HTTPException, Depends
+from datetime import datetime
+
+from fastapi import Depends, HTTPException, Request
 from datetime import datetime
 
 @app.post("/ventas/registrar")
@@ -262,10 +311,20 @@ async def registrar_venta(
             cantidad = int(item["cantidad"])
             tipo_precio = item.get("tipo_precio")
 
+            # =========================
             # 👉 VENTA MANUAL
+            # =========================
             if producto_id is None:
                 nombre_manual = item["nombre"]
                 precio_manual = float(item["precio"])
+                moneda = item.get("moneda", "ARS")   # 👈 VIENE DEL FRONT
+
+                if moneda not in ("ARS", "USD"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Moneda inválida en venta manual"
+                    )
+
                 total = precio_manual * cantidad
 
                 cur.execute("""
@@ -275,26 +334,31 @@ async def registrar_venta(
                         fecha,
                         nombre_manual,
                         precio_manual,
+                        moneda,
                         tipo_pago,
                         dni_cliente,
                         total,
                         tipo_precio
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     None,
                     cantidad,
                     fecha_actual,
                     nombre_manual,
                     precio_manual,
+                    moneda,
                     tipo_pago,
                     dni_cliente,
                     total,
                     tipo_precio
                 ))
 
+            # =========================
             # 👉 PRODUCTO NORMAL
+            # =========================
             else:
                 precio_unitario = float(item["precio"])
+                moneda = item["moneda"]              # 👈 VIENE DEL PRODUCTO
                 total = precio_unitario * cantidad
 
                 cur.execute("""
@@ -302,21 +366,23 @@ async def registrar_venta(
                         producto_id,
                         cantidad,
                         fecha,
+                        precio_unitario,
+                        moneda,
                         tipo_pago,
                         dni_cliente,
                         total,
-                        tipo_precio,
-                        precio_unitario
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        tipo_precio
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     producto_id,
                     cantidad,
                     fecha_actual,
+                    precio_unitario,
+                    moneda,
                     tipo_pago,
                     dni_cliente,
                     total,
-                    tipo_precio,
-                    precio_unitario
+                    tipo_precio
                 ))
 
                 cur.execute("""
@@ -329,6 +395,10 @@ async def registrar_venta(
         request.session["carrito"] = []
         return {"ok": True}
 
+    except HTTPException:
+        db.rollback()
+        raise
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -338,34 +408,66 @@ async def registrar_venta(
 
 
 
+
 # =====================================================
 # PRECIOS ACTUALIZADOS
 # =====================================================
 
+from fastapi import Depends, Request
+
 @app.get("/api/carrito/precios_actualizados")
-def precios_actualizados(tipo_precio: str = "venta", request: Request = None, db=Depends(get_db)):
+def precios_actualizados(
+    tipo_precio: str = "venta",
+    request: Request = None,
+    db=Depends(get_db)
+):
     carrito = request.session.get("carrito", [])
     cur = db.cursor()
 
     nuevos = []
 
     for item in carrito:
+        # =========================
+        # PRODUCTO DE BD
+        # =========================
         if item["id"]:
-            cur.execute(
-                "SELECT precio, precio_revendedor FROM productos_tiendaone WHERE id=%s",
-                (item["id"],),
-            )
+            cur.execute("""
+                SELECT precio, precio_revendedor, moneda
+                FROM productos_tiendaone
+                WHERE id=%s
+            """, (item["id"],))
+
             p = cur.fetchone()
-            precio = float(p["precio"] if tipo_precio == "venta" else p["precio_revendedor"])
+
+            precio = float(
+                p["precio"] if tipo_precio == "venta" else p["precio_revendedor"]
+            )
+
             nuevos.append({
+                "id": item["id"],
                 "nombre": item["nombre"],
                 "cantidad": item["cantidad"],
                 "precio": precio,
+                "moneda": p["moneda"],        # 👈 CLAVE
+                "tipo_precio": tipo_precio,
             })
-        else:
-            nuevos.append(item)
 
+        # =========================
+        # ITEM MANUAL
+        # =========================
+        else:
+            nuevos.append({
+                "id": None,
+                "nombre": item["nombre"],
+                "cantidad": item["cantidad"],
+                "precio": float(item["precio"]),
+                "moneda": item.get("moneda", "ARS"),  # 👈 DEFAULT SEGURO
+                "tipo_precio": tipo_precio,
+            })
+
+    cur.close()
     return nuevos
+
 
 # =====================================================
 # PRODUCTOS MÁS VENDIDOS
@@ -751,67 +853,95 @@ def dashboard(
     fecha_hasta: str | None = None,
     db=Depends(get_db)
 ):
-    cur = db.cursor()
+    cur = db.cursor(cursor_factory=DictCursor)
 
     hoy = datetime.now().strftime("%Y-%m-%d")
     fecha_desde = fecha_desde or hoy
     fecha_hasta = fecha_hasta or hoy
 
-    # -----------------------------------------
-    # Total ventas productos
-    # -----------------------------------------
+    # =====================================================
+    # VENTAS DE PRODUCTOS POR MONEDA
+    # =====================================================
     cur.execute("""
-        SELECT SUM(
-            v.cantidad *
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                ELSE p.precio
-            END
-        ) AS total
+        SELECT
+            p.moneda,
+            SUM(
+                v.cantidad *
+                CASE
+                    WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
+                    ELSE p.precio
+                END
+            ) AS total
         FROM ventas_tiendaone v
-        LEFT JOIN productos_tiendaone p ON v.producto_id = p.id
+        JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
+        GROUP BY p.moneda
     """, (fecha_desde, fecha_hasta))
-    total_ventas_productos = cur.fetchone()["total"] or 0
 
-    # -----------------------------------------
-    # Total reparaciones
-    # -----------------------------------------
+    ventas_productos_por_moneda = {
+        r["moneda"]: float(r["total"] or 0)
+        for r in cur.fetchall()
+    }
+
+    total_ventas_productos = sum(ventas_productos_por_moneda.values())
+
+    # =====================================================
+    # REPARACIONES (ARS)
+    # =====================================================
     cur.execute("""
         SELECT SUM(precio) AS total
         FROM reparaciones_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
-    total_ventas_reparaciones = cur.fetchone()["total"] or 0
+    total_ventas_reparaciones = float(cur.fetchone()["total"] or 0)
 
     total_ventas = total_ventas_productos + total_ventas_reparaciones
 
-    # -----------------------------------------
-    # Total egresos
-    # -----------------------------------------
+    # =====================================================
+    # EGRESOS (ARS)
+    # =====================================================
     cur.execute("""
         SELECT SUM(monto) AS total
         FROM egresos_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
-    total_egresos = cur.fetchone()["total"] or 0
+    total_egresos = float(cur.fetchone()["total"] or 0)
 
-    # -----------------------------------------
-    # Costo productos vendidos
-    # -----------------------------------------
+    # =====================================================
+    # COSTO DE PRODUCTOS (POR MONEDA)
+    # =====================================================
     cur.execute("""
-        SELECT SUM(v.cantidad * p.precio_costo) AS total
+        SELECT
+            p.moneda,
+            SUM(v.cantidad * p.precio_costo) AS total
         FROM ventas_tiendaone v
         JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
+        GROUP BY p.moneda
     """, (fecha_desde, fecha_hasta))
-    total_costo = cur.fetchone()["total"] or 0
+
+    costo_por_moneda = {
+        r["moneda"]: float(r["total"] or 0)
+        for r in cur.fetchall()
+    }
+
+    total_costo = sum(costo_por_moneda.values())
 
     ganancia = total_ventas - total_egresos - total_costo
 
-    # -----------------------------------------
-    # Distribución ventas
-    # -----------------------------------------
+    # =====================================================
+    # GANANCIA POR MONEDA (CORRECTO)
+    # =====================================================
+    ganancia_por_moneda = {}
+
+    for moneda, total in ventas_productos_por_moneda.items():
+        costo = costo_por_moneda.get(moneda, 0)
+        egreso = total_egresos if moneda == "ARS" else 0
+        ganancia_por_moneda[moneda] = total - costo - egreso
+
+    # =====================================================
+    # DISTRIBUCIÓN (COMPATIBLE)
+    # =====================================================
     cur.execute("""
         SELECT 'Productos' AS tipo, SUM(
             v.cantidad *
@@ -821,7 +951,7 @@ def dashboard(
             END
         ) AS total
         FROM ventas_tiendaone v
-        LEFT JOIN productos_tiendaone p ON v.producto_id = p.id
+        JOIN productos_tiendaone p ON v.producto_id = p.id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
 
         UNION ALL
@@ -833,7 +963,10 @@ def dashboard(
 
     distribucion = cur.fetchall()
 
+    cur.close()
+
     return {
+        # ================== EXISTENTE ==================
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
         "total_ventas": total_ventas,
@@ -843,10 +976,15 @@ def dashboard(
         "total_costo": total_costo,
         "ganancia": ganancia,
         "distribucion_ventas": [
-            {"tipo": d["tipo"], "total": d["total"] or 0}
+            {"tipo": d["tipo"], "total": float(d["total"] or 0)}
             for d in distribucion
         ],
+
+        # ================== NUEVO ==================
+        "totales_por_moneda": ventas_productos_por_moneda,
+        "ganancia_por_moneda": ganancia_por_moneda
     }
+
 
 # =====================================================
 # RESUMEN SEMANAL
@@ -892,27 +1030,27 @@ def caja(
     fecha_desde = fecha_desde or hoy.strftime("%Y-%m-%d")
     fecha_hasta = fecha_hasta or hoy.strftime("%Y-%m-%d")
 
-    # 🔹 rango horario correcto
     desde_dt = datetime.fromisoformat(fecha_desde)
     hasta_dt = datetime.fromisoformat(fecha_hasta) + timedelta(days=1)
 
-    cur = db.cursor()
+    cur = db.cursor(cursor_factory=DictCursor)
 
     # ------------------------
-    # VENTAS (producto + manuales)
+    # VENTAS (producto + manuales) POR PAGO Y MONEDA
     # ------------------------
     cur.execute("""
         SELECT
             tipo_pago,
+            moneda,
             SUM(total) AS total
         FROM ventas_tiendaone
         WHERE fecha BETWEEN %s AND %s
-        GROUP BY tipo_pago
+        GROUP BY tipo_pago, moneda
     """, (desde_dt, hasta_dt))
     ventas = cur.fetchall()
 
     # ------------------------
-    # REPARACIONES
+    # REPARACIONES (ASUMIMOS ARS)
     # ------------------------
     cur.execute("""
         SELECT
@@ -925,7 +1063,7 @@ def caja(
     reparaciones = cur.fetchall()
 
     # ------------------------
-    # EGRESOS
+    # EGRESOS (ASUMIMOS ARS)
     # ------------------------
     cur.execute("""
         SELECT
@@ -938,18 +1076,39 @@ def caja(
     egresos = cur.fetchall()
 
     # ------------------------
-    # CONSOLIDACIÓN
+    # CONSOLIDACIÓN COMPATIBLE (SIN ROMPER)
     # ------------------------
     total_por_pago = {}
+    total_por_pago_moneda = {}
 
+    # Ventas
     for v in ventas:
-        total_por_pago[v["tipo_pago"]] = float(v["total"] or 0)
+        tipo = v["tipo_pago"]
+        moneda = v["moneda"]
+        total = float(v["total"] or 0)
 
-    for r in reparaciones:
-        total_por_pago[r["tipo_pago"]] = (
-            total_por_pago.get(r["tipo_pago"], 0) + float(r["total"] or 0)
+        # 🔹 compatibilidad vieja
+        total_por_pago[tipo] = total_por_pago.get(tipo, 0) + total
+
+        # 🔹 nuevo (correcto)
+        total_por_pago_moneda.setdefault(tipo, {})
+        total_por_pago_moneda[tipo][moneda] = (
+            total_por_pago_moneda[tipo].get(moneda, 0) + total
         )
 
+    # Reparaciones (ARS)
+    for r in reparaciones:
+        tipo = r["tipo_pago"]
+        total = float(r["total"] or 0)
+
+        total_por_pago[tipo] = total_por_pago.get(tipo, 0) + total
+
+        total_por_pago_moneda.setdefault(tipo, {})
+        total_por_pago_moneda[tipo]["ARS"] = (
+            total_por_pago_moneda[tipo].get("ARS", 0) + total
+        )
+
+    # Egresos (ARS)
     egresos_por_pago = {
         e["tipo_pago"]: float(e["total"] or 0)
         for e in egresos
@@ -960,12 +1119,25 @@ def caja(
         for tipo, total in total_por_pago.items()
     }
 
+    neto_por_pago_moneda = {}
+
+    for tipo, monedas in total_por_pago_moneda.items():
+        neto_por_pago_moneda[tipo] = {}
+        for moneda, total in monedas.items():
+            egreso = egresos_por_pago.get(tipo, 0) if moneda == "ARS" else 0
+            neto_por_pago_moneda[tipo][moneda] = total - egreso
+
     cur.close()
 
     return {
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
+
+        # 👈 RESPUESTA ORIGINAL (NO SE ROMPE NADA)
         "neto_por_pago": neto_por_pago,
+
+        # 👈 NUEVO: CAJA CORRECTA POR MONEDA
+        "neto_por_pago_moneda": neto_por_pago_moneda
     }
 
 # =====================================================
@@ -1181,6 +1353,9 @@ def eliminar_producto(id: int, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from psycopg2.extras import DictCursor
+from fastapi import Depends
+
 @app.get("/productos")
 def listar_productos(
     busqueda: str | None = None,
@@ -1193,7 +1368,21 @@ def listar_productos(
 
     if busqueda:
         cur.execute("""
-            SELECT *
+            SELECT
+                id,
+                nombre,
+                codigo_barras,
+                stock,
+                precio,
+                moneda,
+                precio_costo,
+                precio_revendedor,
+                categoria,
+                foto_url,
+                num,
+                color,
+                bateria,
+                condicion
             FROM productos_tiendaone
             WHERE nombre ILIKE %s
                OR codigo_barras ILIKE %s
@@ -1209,7 +1398,21 @@ def listar_productos(
         ))
     else:
         cur.execute("""
-            SELECT *
+            SELECT
+                id,
+                nombre,
+                codigo_barras,
+                stock,
+                precio,
+                moneda,
+                precio_costo,
+                precio_revendedor,
+                categoria,
+                foto_url,
+                num,
+                color,
+                bateria,
+                condicion
             FROM productos_tiendaone
             ORDER BY id DESC
             LIMIT %s OFFSET %s
@@ -1217,14 +1420,51 @@ def listar_productos(
 
     rows = cur.fetchall()
 
-    # total (para paginación)
-    cur.execute("SELECT COUNT(*) FROM productos_tiendaone")
+    # total para paginación
+    if busqueda:
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM productos_tiendaone
+            WHERE nombre ILIKE %s
+               OR codigo_barras ILIKE %s
+               OR num ILIKE %s
+        """, (
+            f"%{busqueda}%",
+            f"%{busqueda}%",
+            f"%{busqueda}%"
+        ))
+    else:
+        cur.execute("SELECT COUNT(*) FROM productos_tiendaone")
+
     total = cur.fetchone()[0]
 
+    cur.close()
+
     return {
-        "items": [dict(r) for r in rows],
-        "total": total
+        "items": [
+            {
+                "id": r["id"],
+                "nombre": r["nombre"],
+                "codigo_barras": r["codigo_barras"],
+                "stock": r["stock"],
+                "precio": float(r["precio"]) if r["precio"] is not None else 0,
+                "moneda": r["moneda"],                 # 👈 CLAVE
+                "precio_costo": float(r["precio_costo"]) if r["precio_costo"] else None,
+                "precio_revendedor": float(r["precio_revendedor"]) if r["precio_revendedor"] else None,
+                "categoria": r["categoria"],
+                "foto_url": r["foto_url"],
+                "num": r["num"],
+                "color": r["color"],
+                "bateria": r["bateria"],
+                "condicion": r["condicion"],
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit
     }
+
 
 
 # ==========================
@@ -1257,10 +1497,21 @@ async def upload_imagen(file: UploadFile = File(...)):
 
 
 
+from psycopg2.extras import DictCursor
+from fastapi import Depends, HTTPException
+
 @app.post("/productos")
 def agregar_producto(data: dict, db=Depends(get_db)):
     try:
         cur = db.cursor(cursor_factory=DictCursor)
+
+        # 🔒 Validación simple de moneda
+        moneda = data.get("moneda", "ARS")
+        if moneda not in ("ARS", "USD"):
+            raise HTTPException(
+                status_code=400,
+                detail="Moneda inválida. Use ARS o USD"
+            )
 
         cur.execute("""
             INSERT INTO productos_tiendaone (
@@ -1268,6 +1519,7 @@ def agregar_producto(data: dict, db=Depends(get_db)):
                 codigo_barras,
                 stock,
                 precio,
+                moneda,
                 precio_costo,
                 foto_url,
                 categoria,
@@ -1276,12 +1528,13 @@ def agregar_producto(data: dict, db=Depends(get_db)):
                 bateria,
                 precio_revendedor,
                 condicion
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (
             data["nombre"].upper(),
             data["codigo_barras"],
             int(data["stock"]),
             float(data["precio"]),
+            moneda,                               # 👈 CLAVE
             float(data["precio_costo"]),
             data.get("foto_url"),
             data.get("categoria"),
@@ -1293,6 +1546,7 @@ def agregar_producto(data: dict, db=Depends(get_db)):
         ))
 
         db.commit()
+        cur.close()
         return {"ok": True}
 
     except KeyError as e:
@@ -1301,6 +1555,10 @@ def agregar_producto(data: dict, db=Depends(get_db)):
             status_code=400,
             detail=f"Falta el campo obligatorio: {e}"
         )
+
+    except HTTPException:
+        db.rollback()
+        raise
 
     except Exception as e:
         db.rollback()
@@ -1311,10 +1569,20 @@ def agregar_producto(data: dict, db=Depends(get_db)):
 
 
 
+from fastapi import Depends, HTTPException
+
 @app.put("/productos/{id}")
 def editar_producto(id: int, data: dict, db=Depends(get_db)):
     try:
         cur = db.cursor()
+
+        # 🔒 Validación simple de moneda
+        moneda = data.get("moneda", "ARS")
+        if moneda not in ("ARS", "USD"):
+            raise HTTPException(
+                status_code=400,
+                detail="Moneda inválida. Use ARS o USD"
+            )
 
         cur.execute("""
             UPDATE productos_tiendaone
@@ -1322,6 +1590,7 @@ def editar_producto(id: int, data: dict, db=Depends(get_db)):
                 codigo_barras=%s,
                 stock=%s,
                 precio=%s,
+                moneda=%s,
                 precio_costo=%s,
                 foto_url=%s,
                 categoria=%s,
@@ -1336,8 +1605,9 @@ def editar_producto(id: int, data: dict, db=Depends(get_db)):
             data["codigo_barras"],
             int(data["stock"]),
             float(data["precio"]),
+            moneda,                         # 👈 CLAVE
             float(data["precio_costo"]),
-            data.get("foto_url"),        # ✅ CLAVE
+            data.get("foto_url"),
             data.get("categoria"),
             data.get("num"),
             data.get("color"),
@@ -1348,11 +1618,17 @@ def editar_producto(id: int, data: dict, db=Depends(get_db)):
         ))
 
         db.commit()
+        cur.close()
         return {"ok": True}
+
+    except HTTPException:
+        db.rollback()
+        raise
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # =====================================================
 # TIENDA (PÚBLICA)
@@ -1361,6 +1637,8 @@ def editar_producto(id: int, data: dict, db=Depends(get_db)):
 # =====================================================
 # TIENDA (PÚBLICA) - FIX DEFINITIVO
 # =====================================================
+
+from fastapi import Depends
 
 @app.get("/tienda")
 def tienda(categoria: str | None = None, db=Depends(get_db)):
@@ -1373,6 +1651,7 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
                 nombre,
                 stock,
                 precio,
+                moneda,
                 foto_url,
                 categoria,
                 color,
@@ -1392,6 +1671,7 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
                 nombre,
                 stock,
                 precio,
+                moneda,
                 foto_url,
                 categoria,
                 color,
@@ -1412,12 +1692,13 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
             "nombre": r[1],
             "stock": r[2],
             "precio": float(r[3]) if r[3] is not None else 0,
-            "foto_url": r[4],
-            "categoria": r[5],
-            "color": r[6],
-            "bateria": r[7],
-            "condicion": r[8],
-            "precio_revendedor": float(r[9]) if r[9] is not None else 0,
+            "moneda": r[4],                      # 👈 CLAVE
+            "foto_url": r[5],
+            "categoria": r[6],
+            "color": r[7],
+            "bateria": r[8],
+            "condicion": r[9],
+            "precio_revendedor": float(r[10]) if r[10] is not None else 0,
         }
         for r in rows
     ]
@@ -1429,6 +1710,8 @@ def tienda(categoria: str | None = None, db=Depends(get_db)):
         ORDER BY categoria
     """)
     categorias = [r[0] for r in cur.fetchall()]
+
+    cur.close()
 
     return {
         "productos": productos,
@@ -1492,6 +1775,9 @@ def exportar_stock(db=Depends(get_db)):
 from fastapi import Query, Depends
 from datetime import datetime, timedelta
 
+from fastapi import Depends, Query
+from datetime import datetime, timedelta
+
 @app.get("/transacciones")
 def listar_transacciones(
     desde: str = Query(...),
@@ -1515,17 +1801,33 @@ def listar_transacciones(
             v.cantidad,
             v.precio_unitario,
             COALESCE(v.total, 0) AS total,
+            p.moneda,                  -- 👈 CLAVE
             v.tipo_pago,
             v.dni_cliente,
             v.tipo_precio
         FROM ventas_tiendaone v
         JOIN productos_tiendaone p ON p.id = v.producto_id
         WHERE v.producto_id IS NOT NULL
-        AND v.fecha BETWEEN %s AND %s
+          AND v.fecha BETWEEN %s AND %s
         ORDER BY v.fecha DESC
     """, (desde_dt, hasta_dt))
 
-    ventas = [dict(r) for r in cur.fetchall()]
+    ventas = [
+        {
+            "id": r[0],
+            "fecha": r[1],
+            "producto": r[2],
+            "num": r[3],
+            "cantidad": r[4],
+            "precio_unitario": float(r[5]),
+            "total": float(r[6]),
+            "moneda": r[7],             # 👈 ARS / USD
+            "tipo_pago": r[8],
+            "dni_cliente": r[9],
+            "tipo_precio": r[10],
+        }
+        for r in cur.fetchall()
+    ]
 
     # =========================
     # VENTAS MANUALES
@@ -1539,16 +1841,32 @@ def listar_transacciones(
             cantidad,
             precio_manual AS precio_unitario,
             COALESCE(total, 0) AS total,
+            moneda,                    -- 👈 CLAVE (agregar columna)
             tipo_pago,
             dni_cliente,
             tipo_precio
         FROM ventas_tiendaone
         WHERE producto_id IS NULL
-        AND fecha BETWEEN %s AND %s
+          AND fecha BETWEEN %s AND %s
         ORDER BY fecha DESC
     """, (desde_dt, hasta_dt))
 
-    manuales = [dict(r) for r in cur.fetchall()]
+    manuales = [
+        {
+            "id": r[0],
+            "fecha": r[1],
+            "producto": r[2],
+            "num": r[3],
+            "cantidad": r[4],
+            "precio_unitario": float(r[5]),
+            "total": float(r[6]),
+            "moneda": r[7],             # 👈 ARS / USD
+            "tipo_pago": r[8],
+            "dni_cliente": r[9],
+            "tipo_precio": r[10],
+        }
+        for r in cur.fetchall()
+    ]
 
     cur.close()
 
