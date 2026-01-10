@@ -319,9 +319,9 @@ async def registrar_venta(
             cantidad = int(item["cantidad"])
             tipo_precio = item.get("tipo_precio") or "venta"
 
-            # =========================
+            # =====================================================
             # 👉 VENTA MANUAL
-            # =========================
+            # =====================================================
             if producto_id is None:
                 nombre_manual = item["nombre"]
                 precio_manual = float(item["precio"])
@@ -356,9 +356,12 @@ async def registrar_venta(
                     tipo_precio
                 ))
 
-            # =========================
+                # 🔑 LEER ID INMEDIATAMENTE
+                venta_id = cur.fetchone()[0]
+
+            # =====================================================
             # 👉 PRODUCTO NORMAL
-            # =========================
+            # =====================================================
             else:
                 precio_unitario = float(item["precio"])
                 moneda = item["moneda"]
@@ -390,21 +393,19 @@ async def registrar_venta(
                     tipo_precio
                 ))
 
-                # 🔥 DESCONTAR STOCK
+                # 🔑 LEER ID ANTES DE CUALQUIER OTRO EXECUTE
+                venta_id = cur.fetchone()[0]
+
+                # 🔥 DESCONTAR STOCK (DESPUÉS)
                 cur.execute("""
                     UPDATE productos_tiendaone
                     SET stock = stock - %s
                     WHERE id = %s
                 """, (cantidad, producto_id))
 
-            # =========================
-            # 🔑 ID DE LA VENTA
-            # =========================
-            venta_id = cur.fetchone()[0]
-
-            # =========================
+            # =====================================================
             # 💳 GUARDAR PAGOS
-            # =========================
+            # =====================================================
             for p in pagos:
                 cur.execute("""
                     INSERT INTO pagos_tiendaone (
@@ -412,7 +413,8 @@ async def registrar_venta(
                         metodo,
                         moneda,
                         monto
-                    ) VALUES (%s,%s,%s,%s)
+                    )
+                    VALUES (%s,%s,%s,%s)
                 """, (
                     venta_id,
                     p["metodo"],
@@ -431,6 +433,7 @@ async def registrar_venta(
 
     finally:
         cur.close()
+
 
 
 
