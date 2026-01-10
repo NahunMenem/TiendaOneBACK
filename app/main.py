@@ -1066,23 +1066,25 @@ def caja(
 
     cur = db.cursor(cursor_factory=DictCursor)
 
-    # ------------------------
-    # VENTAS (producto + manuales) POR PAGO Y MONEDA
-    # ------------------------
+    # =====================================================
+    # 💳 INGRESOS REALES (VENTAS + MANUALES) DESDE PAGOS
+    # =====================================================
     cur.execute("""
         SELECT
-            tipo_pago,
-            moneda,
-            SUM(total) AS total
-        FROM ventas_tiendaone
-        WHERE fecha BETWEEN %s AND %s
-        GROUP BY tipo_pago, moneda
+            pg.metodo AS tipo_pago,
+            pg.moneda,
+            SUM(pg.monto) AS total
+        FROM pagos_tiendaone pg
+        JOIN ventas_tiendaone v ON v.id = pg.venta_id
+        WHERE v.fecha BETWEEN %s AND %s
+        GROUP BY pg.metodo, pg.moneda
     """, (desde_dt, hasta_dt))
-    ventas = cur.fetchall()
 
-    # ------------------------
-    # REPARACIONES (ASUMIMOS ARS)
-    # ------------------------
+    pagos = cur.fetchall()
+
+    # =====================================================
+    # 🔧 REPARACIONES (ARS)
+    # =====================================================
     cur.execute("""
         SELECT
             tipo_pago,
@@ -1091,11 +1093,12 @@ def caja(
         WHERE fecha BETWEEN %s AND %s
         GROUP BY tipo_pago
     """, (desde_dt, hasta_dt))
+
     reparaciones = cur.fetchall()
 
-    # ------------------------
-    # EGRESOS (ASUMIMOS ARS)
-    # ------------------------
+    # =====================================================
+    # 📉 EGRESOS (ARS)
+    # =====================================================
     cur.execute("""
         SELECT
             tipo_pago,
@@ -1104,30 +1107,31 @@ def caja(
         WHERE fecha BETWEEN %s AND %s
         GROUP BY tipo_pago
     """, (desde_dt, hasta_dt))
+
     egresos = cur.fetchall()
 
-    # ------------------------
-    # CONSOLIDACIÓN COMPATIBLE (SIN ROMPER)
-    # ------------------------
+    # =====================================================
+    # 🧮 CONSOLIDACIÓN (COMPATIBLE + POR MONEDA)
+    # =====================================================
     total_por_pago = {}
     total_por_pago_moneda = {}
 
-    # Ventas
-    for v in ventas:
-        tipo = v["tipo_pago"]
-        moneda = v["moneda"]
-        total = float(v["total"] or 0)
+    # INGRESOS (pagos reales)
+    for p in pagos:
+        tipo = p["tipo_pago"]
+        moneda = p["moneda"]
+        total = float(p["total"] or 0)
 
-        # 🔹 compatibilidad vieja
+        # legacy
         total_por_pago[tipo] = total_por_pago.get(tipo, 0) + total
 
-        # 🔹 nuevo (correcto)
+        # por moneda
         total_por_pago_moneda.setdefault(tipo, {})
         total_por_pago_moneda[tipo][moneda] = (
             total_por_pago_moneda[tipo].get(moneda, 0) + total
         )
 
-    # Reparaciones (ARS)
+    # REPARACIONES (ARS)
     for r in reparaciones:
         tipo = r["tipo_pago"]
         total = float(r["total"] or 0)
@@ -1139,17 +1143,19 @@ def caja(
             total_por_pago_moneda[tipo].get("ARS", 0) + total
         )
 
-    # Egresos (ARS)
+    # EGRESOS (ARS)
     egresos_por_pago = {
         e["tipo_pago"]: float(e["total"] or 0)
         for e in egresos
     }
 
+    # NETO LEGACY
     neto_por_pago = {
         tipo: total - egresos_por_pago.get(tipo, 0)
         for tipo, total in total_por_pago.items()
     }
 
+    # NETO POR MONEDA (CORRECTO)
     neto_por_pago_moneda = {}
 
     for tipo, monedas in total_por_pago_moneda.items():
@@ -1164,12 +1170,13 @@ def caja(
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
 
-        # 👈 RESPUESTA ORIGINAL (NO SE ROMPE NADA)
+        # 👈 compatibilidad vieja
         "neto_por_pago": neto_por_pago,
 
-        # 👈 NUEVO: CAJA CORRECTA POR MONEDA
+        # 👈 caja correcta separada por moneda
         "neto_por_pago_moneda": neto_por_pago_moneda
     }
+
 
 # =====================================================
 # REPARACIONES
@@ -1929,60 +1936,59 @@ from io import BytesIO
 def exportar_transacciones(
     desde: str,
     hasta: str,
-    db = Depends(get_db)
+    db=Depends(get_db)
 ):
     cur = db.cursor()
 
     desde_dt = datetime.fromisoformat(desde)
     hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
 
-    # Ventas con producto
+    # ======================================
+    # EXPORTAR TRANSACCIONES + PAGOS
+    # ======================================
     cur.execute("""
         SELECT
             v.fecha,
-            p.nombre AS producto,
+            COALESCE(p.nombre, v.nombre_manual) AS producto,
             v.cantidad,
-            v.precio_unitario,
-            v.total,
+            COALESCE(v.precio_unitario, v.precio_manual, 0) AS precio_unitario,
+            v.total AS total_venta,
+            pg.metodo AS metodo_pago,
+            pg.moneda,
+            pg.monto AS monto_pagado,
             v.tipo_pago,
+            v.tipo_precio,
             v.dni_cliente
         FROM ventas_tiendaone v
-        JOIN productos_tiendaone p ON p.id = v.producto_id
-        WHERE v.producto_id IS NOT NULL
-        AND v.fecha BETWEEN %s AND %s
+        LEFT JOIN productos_tiendaone p ON p.id = v.producto_id
+        JOIN pagos_tiendaone pg ON pg.venta_id = v.id
+        WHERE v.fecha BETWEEN %s AND %s
+        ORDER BY v.fecha DESC
     """, (desde_dt, hasta_dt))
-    ventas_df = pd.DataFrame(cur.fetchall(), columns=[c.name for c in cur.description])
 
-    # Ventas manuales
-    cur.execute("""
-        SELECT
-            fecha,
-            nombre_manual AS producto,
-            cantidad,
-            precio_manual AS precio_unitario,
-            total,
-            tipo_pago,
-            dni_cliente
-        FROM ventas_tiendaone
-        WHERE producto_id IS NULL
-        AND fecha BETWEEN %s AND %s
-    """, (desde_dt, hasta_dt))
-    manuales_df = pd.DataFrame(cur.fetchall(), columns=[c.name for c in cur.description])
+    rows = cur.fetchall()
+    columns = [c.name for c in cur.description]
+    df = pd.DataFrame(rows, columns=columns)
 
     cur.close()
 
+    # ======================================
+    # EXPORTAR A EXCEL
+    # ======================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        ventas_df.to_excel(writer, sheet_name="Ventas", index=False)
-        manuales_df.to_excel(writer, sheet_name="Ventas Manuales", index=False)
+        df.to_excel(writer, sheet_name="Transacciones", index=False)
 
     output.seek(0)
 
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=transacciones.xlsx"}
+        headers={
+            "Content-Disposition": "attachment; filename=transacciones_detalladas.xlsx"
+        }
     )
+
 
 
 from fastapi import HTTPException
