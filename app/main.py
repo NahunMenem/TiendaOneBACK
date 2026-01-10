@@ -1817,9 +1817,9 @@ def listar_transacciones(
     desde_dt = datetime.fromisoformat(desde)
     hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
 
-    # =====================================================
+    # =========================
     # VENTAS CON PRODUCTO
-    # =====================================================
+    # =========================
     cur.execute("""
         SELECT
             v.id,
@@ -1842,9 +1842,9 @@ def listar_transacciones(
 
     ventas_raw = cur.fetchall()
 
-    # =====================================================
+    # =========================
     # VENTAS MANUALES
-    # =====================================================
+    # =========================
     cur.execute("""
         SELECT
             id,
@@ -1866,16 +1866,16 @@ def listar_transacciones(
 
     manuales_raw = cur.fetchall()
 
-    # =====================================================
-    # ARMAR RESPUESTA + PAGOS
-    # =====================================================
+    # =========================
+    # ARMAR RESPUESTA CON PAGOS
+    # =========================
     def armar_venta(r):
         venta_id = r[0]
 
-        # 🔹 TRAER PAGOS DE LA VENTA
+        # 👇 ACÁ ESTABA EL ERROR
         cur.execute("""
             SELECT metodo, moneda, monto
-            FROM pagos_venta
+            FROM pagos_tiendaone
             WHERE venta_id = %s
         """, (venta_id,))
 
@@ -1900,7 +1900,7 @@ def listar_transacciones(
             "tipo_pago": r[8],
             "dni_cliente": r[9],
             "tipo_precio": r[10],
-            "pagos": pagos,  # 👈 CLAVE
+            "pagos": pagos,
         }
 
     ventas = [armar_venta(r) for r in ventas_raw]
