@@ -1782,7 +1782,7 @@ from datetime import datetime, timedelta
 def listar_transacciones(
     desde: str = Query(...),
     hasta: str = Query(...),
-    db = Depends(get_db)
+    db=Depends(get_db)
 ):
     cur = db.cursor()
 
@@ -1799,9 +1799,9 @@ def listar_transacciones(
             p.nombre AS producto,
             p.num,
             v.cantidad,
-            v.precio_unitario,
+            COALESCE(v.precio_unitario, 0) AS precio_unitario,
             COALESCE(v.total, 0) AS total,
-            p.moneda,                  -- 👈 CLAVE
+            p.moneda,
             v.tipo_pago,
             v.dni_cliente,
             v.tipo_precio
@@ -1819,9 +1819,9 @@ def listar_transacciones(
             "producto": r[2],
             "num": r[3],
             "cantidad": r[4],
-            "precio_unitario": float(r[5]),
-            "total": float(r[6]),
-            "moneda": r[7],             # 👈 ARS / USD
+            "precio_unitario": float(r[5] or 0),
+            "total": float(r[6] or 0),
+            "moneda": r[7],
             "tipo_pago": r[8],
             "dni_cliente": r[9],
             "tipo_precio": r[10],
@@ -1839,9 +1839,9 @@ def listar_transacciones(
             nombre_manual AS producto,
             '-' AS num,
             cantidad,
-            precio_manual AS precio_unitario,
+            COALESCE(precio_manual, 0) AS precio_unitario,
             COALESCE(total, 0) AS total,
-            moneda,                    -- 👈 CLAVE (agregar columna)
+            moneda,
             tipo_pago,
             dni_cliente,
             tipo_precio
@@ -1858,9 +1858,9 @@ def listar_transacciones(
             "producto": r[2],
             "num": r[3],
             "cantidad": r[4],
-            "precio_unitario": float(r[5]),
-            "total": float(r[6]),
-            "moneda": r[7],             # 👈 ARS / USD
+            "precio_unitario": float(r[5] or 0),
+            "total": float(r[6] or 0),
+            "moneda": r[7],
             "tipo_pago": r[8],
             "dni_cliente": r[9],
             "tipo_precio": r[10],
@@ -1874,6 +1874,7 @@ def listar_transacciones(
         "ventas": ventas,
         "manuales": manuales
     }
+
 
 
 
