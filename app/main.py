@@ -340,7 +340,9 @@ async def registrar_venta(
                         dni_cliente,
                         total,
                         tipo_precio
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id
                 """, (
                     None,
                     cantidad,
@@ -373,7 +375,9 @@ async def registrar_venta(
                         dni_cliente,
                         total,
                         tipo_precio
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id
                 """, (
                     producto_id,
                     cantidad,
@@ -386,12 +390,35 @@ async def registrar_venta(
                     tipo_precio
                 ))
 
-                # 🔥 DESCONTAR STOCK UNA SOLA VEZ
+                # 🔥 DESCONTAR STOCK
                 cur.execute("""
                     UPDATE productos_tiendaone
                     SET stock = stock - %s
                     WHERE id = %s
                 """, (cantidad, producto_id))
+
+            # =========================
+            # 🔑 ID DE LA VENTA
+            # =========================
+            venta_id = cur.fetchone()[0]
+
+            # =========================
+            # 💳 GUARDAR PAGOS
+            # =========================
+            for p in pagos:
+                cur.execute("""
+                    INSERT INTO pagos_tiendaone (
+                        venta_id,
+                        metodo,
+                        moneda,
+                        monto
+                    ) VALUES (%s,%s,%s,%s)
+                """, (
+                    venta_id,
+                    p["metodo"],
+                    p["moneda"],
+                    float(p["monto"])
+                ))
 
         db.commit()
         request.session["carrito"] = []
@@ -404,6 +431,7 @@ async def registrar_venta(
 
     finally:
         cur.close()
+
 
 
 
