@@ -1789,9 +1789,9 @@ def listar_transacciones(
     desde_dt = datetime.fromisoformat(desde)
     hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
 
-    # =========================
+    # =====================================================
     # VENTAS CON PRODUCTO
-    # =========================
+    # =====================================================
     cur.execute("""
         SELECT
             v.id,
@@ -1799,8 +1799,8 @@ def listar_transacciones(
             p.nombre AS producto,
             p.num,
             v.cantidad,
-            COALESCE(v.precio_unitario, 0) AS precio_unitario,
-            COALESCE(v.total, 0) AS total,
+            COALESCE(v.precio_unitario, 0),
+            COALESCE(v.total, 0),
             p.moneda,
             v.tipo_pago,
             v.dni_cliente,
@@ -1812,26 +1812,11 @@ def listar_transacciones(
         ORDER BY v.fecha DESC
     """, (desde_dt, hasta_dt))
 
-    ventas = [
-        {
-            "id": r[0],
-            "fecha": r[1],
-            "producto": r[2],
-            "num": r[3],
-            "cantidad": r[4],
-            "precio_unitario": float(r[5] or 0),
-            "total": float(r[6] or 0),
-            "moneda": r[7],
-            "tipo_pago": r[8],
-            "dni_cliente": r[9],
-            "tipo_precio": r[10],
-        }
-        for r in cur.fetchall()
-    ]
+    ventas_raw = cur.fetchall()
 
-    # =========================
+    # =====================================================
     # VENTAS MANUALES
-    # =========================
+    # =====================================================
     cur.execute("""
         SELECT
             id,
@@ -1839,8 +1824,8 @@ def listar_transacciones(
             nombre_manual AS producto,
             '-' AS num,
             cantidad,
-            COALESCE(precio_manual, 0) AS precio_unitario,
-            COALESCE(total, 0) AS total,
+            COALESCE(precio_manual, 0),
+            COALESCE(total, 0),
             moneda,
             tipo_pago,
             dni_cliente,
@@ -1851,22 +1836,47 @@ def listar_transacciones(
         ORDER BY fecha DESC
     """, (desde_dt, hasta_dt))
 
-    manuales = [
-        {
+    manuales_raw = cur.fetchall()
+
+    # =====================================================
+    # ARMAR RESPUESTA + PAGOS
+    # =====================================================
+    def armar_venta(r):
+        venta_id = r[0]
+
+        # 🔹 TRAER PAGOS DE LA VENTA
+        cur.execute("""
+            SELECT metodo, moneda, monto
+            FROM pagos_venta
+            WHERE venta_id = %s
+        """, (venta_id,))
+
+        pagos = [
+            {
+                "metodo": p[0],
+                "moneda": p[1],
+                "monto": float(p[2])
+            }
+            for p in cur.fetchall()
+        ]
+
+        return {
             "id": r[0],
             "fecha": r[1],
             "producto": r[2],
             "num": r[3],
             "cantidad": r[4],
-            "precio_unitario": float(r[5] or 0),
-            "total": float(r[6] or 0),
+            "precio_unitario": float(r[5]),
+            "total": float(r[6]),
             "moneda": r[7],
             "tipo_pago": r[8],
             "dni_cliente": r[9],
             "tipo_precio": r[10],
+            "pagos": pagos,  # 👈 CLAVE
         }
-        for r in cur.fetchall()
-    ]
+
+    ventas = [armar_venta(r) for r in ventas_raw]
+    manuales = [armar_venta(r) for r in manuales_raw]
 
     cur.close()
 
