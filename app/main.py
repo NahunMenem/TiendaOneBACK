@@ -891,55 +891,49 @@ def dashboard(
     fecha_hasta = fecha_hasta or hoy
 
     # =====================================================
-    # VENTAS DE PRODUCTOS POR MONEDA
+    # 💳 INGRESOS REALES DESDE PAGOS (POR MONEDA)
     # =====================================================
     cur.execute("""
         SELECT
-            p.moneda,
-            SUM(
-                v.cantidad *
-                CASE
-                    WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                    ELSE p.precio
-                END
-            ) AS total
-        FROM ventas_tiendaone v
-        JOIN productos_tiendaone p ON v.producto_id = p.id
+            pg.moneda,
+            SUM(pg.monto) AS total
+        FROM pagos_tiendaone pg
+        JOIN ventas_tiendaone v ON v.id = pg.venta_id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
-        GROUP BY p.moneda
+        GROUP BY pg.moneda
     """, (fecha_desde, fecha_hasta))
 
-    ventas_productos_por_moneda = {
+    ingresos_por_moneda = {
         r["moneda"]: float(r["total"] or 0)
         for r in cur.fetchall()
     }
 
-    total_ventas_productos = sum(ventas_productos_por_moneda.values())
+    total_ingresos = sum(ingresos_por_moneda.values())
 
     # =====================================================
-    # REPARACIONES (ARS)
+    # 🔧 REPARACIONES (ARS)
     # =====================================================
     cur.execute("""
         SELECT SUM(precio) AS total
         FROM reparaciones_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
-    total_ventas_reparaciones = float(cur.fetchone()["total"] or 0)
 
-    total_ventas = total_ventas_productos + total_ventas_reparaciones
+    total_reparaciones = float(cur.fetchone()["total"] or 0)
 
     # =====================================================
-    # EGRESOS (ARS)
+    # 📉 EGRESOS (ARS)
     # =====================================================
     cur.execute("""
         SELECT SUM(monto) AS total
         FROM egresos_tiendaone
         WHERE DATE(fecha) BETWEEN %s AND %s
     """, (fecha_desde, fecha_hasta))
+
     total_egresos = float(cur.fetchone()["total"] or 0)
 
     # =====================================================
-    # COSTO DE PRODUCTOS (POR MONEDA)
+    # 📦 COSTO DE PRODUCTOS (POR MONEDA)
     # =====================================================
     cur.execute("""
         SELECT
@@ -958,32 +952,27 @@ def dashboard(
 
     total_costo = sum(costo_por_moneda.values())
 
-    ganancia = total_ventas - total_egresos - total_costo
-
     # =====================================================
-    # GANANCIA POR MONEDA (CORRECTO)
+    # 🧮 GANANCIA POR MONEDA (CORRECTA)
     # =====================================================
     ganancia_por_moneda = {}
 
-    for moneda, total in ventas_productos_por_moneda.items():
+    for moneda, ingresos in ingresos_por_moneda.items():
         costo = costo_por_moneda.get(moneda, 0)
         egreso = total_egresos if moneda == "ARS" else 0
-        ganancia_por_moneda[moneda] = total - costo - egreso
+        reparaciones = total_reparaciones if moneda == "ARS" else 0
+
+        ganancia_por_moneda[moneda] = ingresos - costo - egreso + reparaciones
+
+    ganancia_total = sum(ganancia_por_moneda.values())
 
     # =====================================================
-    # DISTRIBUCIÓN (COMPATIBLE)
+    # 📊 DISTRIBUCIÓN (LEGACY, NO SE ROMPE)
     # =====================================================
     cur.execute("""
-        SELECT 'Productos' AS tipo, SUM(
-            v.cantidad *
-            CASE
-                WHEN v.tipo_precio = 'revendedor' THEN p.precio_revendedor
-                ELSE p.precio
-            END
-        ) AS total
-        FROM ventas_tiendaone v
-        JOIN productos_tiendaone p ON v.producto_id = p.id
-        WHERE DATE(v.fecha) BETWEEN %s AND %s
+        SELECT 'Productos' AS tipo, SUM(total) AS total
+        FROM ventas_tiendaone
+        WHERE DATE(fecha) BETWEEN %s AND %s
 
         UNION ALL
 
@@ -1000,21 +989,22 @@ def dashboard(
         # ================== EXISTENTE ==================
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
-        "total_ventas": total_ventas,
-        "total_ventas_productos": total_ventas_productos,
-        "total_ventas_reparaciones": total_ventas_reparaciones,
+        "total_ventas": total_ingresos,
+        "total_ventas_reparaciones": total_reparaciones,
         "total_egresos": total_egresos,
         "total_costo": total_costo,
-        "ganancia": ganancia,
+        "ganancia": ganancia_total,
         "distribucion_ventas": [
             {"tipo": d["tipo"], "total": float(d["total"] or 0)}
             for d in distribucion
         ],
 
-        # ================== NUEVO ==================
-        "totales_por_moneda": ventas_productos_por_moneda,
+        # ================== NUEVO / CORRECTO ==================
+        "ingresos_por_moneda": ingresos_por_moneda,
+        "costo_por_moneda": costo_por_moneda,
         "ganancia_por_moneda": ganancia_por_moneda
     }
+
 
 
 # =====================================================
