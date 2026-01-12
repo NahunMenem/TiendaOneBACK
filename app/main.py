@@ -46,7 +46,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://tiendaone.vercel.app",  # si después deployás el front
+        "https://tiendaone.vercel.app",
+        "https://tiendauno.vercel.app",# si después deployás el front https://tiendauno.vercel.app/
     ],
     allow_credentials=True,
     allow_methods=["*"],
