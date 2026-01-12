@@ -1760,6 +1760,9 @@ from datetime import datetime, timedelta
 from fastapi import Depends, Query
 from datetime import datetime, timedelta
 
+from fastapi import Query, Depends
+from datetime import datetime
+
 @app.get("/transacciones")
 def listar_transacciones(
     desde: str = Query(...),
@@ -1771,9 +1774,9 @@ def listar_transacciones(
     desde_dt = datetime.fromisoformat(desde)
     hasta_dt = datetime.fromisoformat(hasta)
 
-    # =========================
-    # VENTAS (CABECERA)
-    # =========================
+    # =====================================================
+    # 🛒 VENTAS
+    # =====================================================
     cur.execute("""
         SELECT
             id,
@@ -1786,15 +1789,12 @@ def listar_transacciones(
     """, (desde_dt, hasta_dt))
 
     ventas_raw = cur.fetchall()
-
     ventas = []
 
     for v in ventas_raw:
         venta_id = v[0]
 
-        # =========================
-        # ITEMS DE LA VENTA
-        # =========================
+        # -------- ITEMS --------
         cur.execute("""
             SELECT
                 COALESCE(p.nombre, vi.nombre_manual) AS producto,
@@ -1820,9 +1820,7 @@ def listar_transacciones(
             for r in cur.fetchall()
         ]
 
-        # =========================
-        # PAGOS DE LA VENTA
-        # =========================
+        # -------- PAGOS --------
         cur.execute("""
             SELECT metodo, moneda, monto
             FROM pagos_tiendaone
@@ -1839,6 +1837,7 @@ def listar_transacciones(
         ]
 
         ventas.append({
+            "tipo": "venta",
             "id": venta_id,
             "fecha": v[1],
             "dni_cliente": v[2],
@@ -1847,10 +1846,54 @@ def listar_transacciones(
             "pagos": pagos,
         })
 
+    # =====================================================
+    # 🔧 REPARACIONES
+    # =====================================================
+    cur.execute("""
+        SELECT
+            r.id,
+            r.fecha,
+            r.cliente,
+            r.equipo,
+            r.descripcion,
+            p.metodo,
+            p.moneda,
+            p.monto
+        FROM pagos_tiendaone p
+        JOIN reparaciones_tiendaone r ON r.id = p.reparacion_id
+        WHERE r.fecha BETWEEN %s AND %s
+        ORDER BY r.fecha DESC
+    """, (desde_dt, hasta_dt))
+
+    reparaciones = [
+        {
+            "tipo": "reparacion",
+            "id": r[0],
+            "fecha": r[1],
+            "cliente": r[2],
+            "equipo": r[3],
+            "reparacion": r[4],
+            "total": float(r[7]),
+            "pagos": [
+                {
+                    "metodo": r[5],
+                    "moneda": r[6],
+                    "monto": float(r[7]),
+                }
+            ],
+        }
+        for r in cur.fetchall()
+    ]
+
     cur.close()
 
-    return ventas
-
+    # =====================================================
+    # 📦 RESPUESTA UNIFICADA
+    # =====================================================
+    return {
+        "ventas": ventas,
+        "reparaciones": reparaciones
+    }
 
 
 
