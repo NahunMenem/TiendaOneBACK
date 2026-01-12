@@ -1992,12 +1992,13 @@ ESTADOS_VALIDOS = (
 
 @app.post("/reparaciones")
 def crear_reparacion(data: dict, db=Depends(get_db)):
-    try:
-        cur = db.cursor(cursor_factory=DictCursor)
+    cur = db.cursor(cursor_factory=DictCursor)
 
+    try:
         estado = data.get("estado", "ingresado")
+
         if estado not in ESTADOS_VALIDOS:
-            raise HTTPException(400, "Estado inválido")
+            raise HTTPException(400, f"Estado inválido: {estado}")
 
         cur.execute("""
             INSERT INTO reparaciones_tiendaone (
@@ -2020,21 +2021,26 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
             float(data["precio"]),
             estado,
             False,
-            data["cliente"],
+            data.get("cliente"),
             data.get("telefono"),
-            data["equipo"],
+            data.get("equipo"),
             data.get("imei"),
         ))
 
-        reparacion_id = cur.fetchone()["id"]
-        db.commit()
-        cur.close()
+        row = cur.fetchone()
+        reparacion_id = row["id"]
 
+        db.commit()
         return {"ok": True, "id": reparacion_id}
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, str(e))
+        print("ERROR CREAR REPARACION:", e)  # 👈 CLAVE
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        cur.close()
+
 
 
 
