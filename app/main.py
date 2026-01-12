@@ -1995,9 +1995,16 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
     try:
         cur = db.cursor(cursor_factory=DictCursor)
 
-        estado = data.get("estado", "ingresado")
+        estado = data.get("estado") or "ingresado"
         if estado not in ESTADOS_VALIDOS:
             raise HTTPException(400, "Estado inválido")
+
+        # VALIDACIONES CLARAS
+        if not data.get("reparacion"):
+            raise HTTPException(400, "Falta descripción de reparación")
+
+        if not data.get("precio"):
+            raise HTTPException(400, "Falta precio")
 
         cur.execute("""
             INSERT INTO reparaciones_tiendaone (
@@ -2023,15 +2030,19 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
         db.commit()
         cur.close()
 
-        return {"ok": True, "reparacion_id": reparacion_id}
+        return {
+            "ok": True,
+            "reparacion_id": reparacion_id
+        }
 
-    except KeyError as e:
+    except HTTPException:
         db.rollback()
-        raise HTTPException(400, f"Falta el campo obligatorio: {e}")
+        raise
 
     except Exception as e:
         db.rollback()
         raise HTTPException(500, str(e))
+
 
 
 
