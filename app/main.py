@@ -2053,9 +2053,9 @@ def listar_reparaciones(estado: str | None = None, db=Depends(get_db)):
             SELECT
                 id,
                 cliente,
+                dni,
                 telefono,
                 equipo,
-                dni,
                 imei,
                 descripcion AS reparacion,
                 precio,
@@ -2070,6 +2070,7 @@ def listar_reparaciones(estado: str | None = None, db=Depends(get_db)):
             SELECT
                 id,
                 cliente,
+                dni,
                 telefono,
                 equipo,
                 imei,
@@ -2083,7 +2084,9 @@ def listar_reparaciones(estado: str | None = None, db=Depends(get_db)):
 
     rows = cur.fetchall()
     cur.close()
-    return rows
+
+    # 🔥 CLAVE: convertir a dict real
+    return [dict(r) for r in rows]
 
 
 
