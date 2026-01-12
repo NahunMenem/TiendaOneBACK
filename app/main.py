@@ -2187,26 +2187,15 @@ def cambiar_estado_reparacion(
     return {"ok": True}
 
 @app.post("/reparaciones/{id}/cobrar")
-def cobrar_reparacion(
-    id: int,
-    data: dict,
-    db=Depends(get_db)
-):
-    """
-    data = {
-      metodo: "efectivo" | "debito" | "credito" | "transferencia" | "qr",
-      moneda: "ARS" | "USD",
-      monto: number
-    }
-    """
+def cobrar_reparacion(id: int, data: dict, db=Depends(get_db)):
     cur = db.cursor(cursor_factory=DictCursor)
 
     # =========================
-    # Validaciones
+    # Buscar reparación REAL
     # =========================
     cur.execute("""
         SELECT precio, cobrada
-        FROM reparaciones_tiendaone
+        FROM reparaciones
         WHERE id = %s
     """, (id,))
     rep = cur.fetchone()
@@ -2217,6 +2206,9 @@ def cobrar_reparacion(
     if rep["cobrada"]:
         raise HTTPException(400, "La reparación ya fue cobrada")
 
+    # =========================
+    # Validaciones
+    # =========================
     moneda = data.get("moneda", "ARS")
     if moneda not in ("ARS", "USD"):
         raise HTTPException(400, "Moneda inválida")
@@ -2230,8 +2222,7 @@ def cobrar_reparacion(
         raise HTTPException(400, "Monto inválido")
 
     # =========================
-    # Registrar pago
-    # venta_id = NULL (clave)
+    # Registrar pago (sin venta)
     # =========================
     cur.execute("""
         INSERT INTO pagos_tiendaone (
@@ -2241,7 +2232,7 @@ def cobrar_reparacion(
             monto
         ) VALUES (%s,%s,%s,%s)
     """, (
-        None,          # 👈 REPARACIÓN
+        None,        # reparación
         metodo,
         moneda,
         monto
@@ -2251,11 +2242,11 @@ def cobrar_reparacion(
     # Marcar reparación cobrada
     # =========================
     cur.execute("""
-        UPDATE reparaciones_tiendaone
+        UPDATE reparaciones
         SET
             estado = 'retirado',
             cobrada = TRUE,
-            fecha = NOW()
+            fecha_actualizacion = NOW()
         WHERE id = %s
     """, (id,))
 
@@ -2267,7 +2258,7 @@ def cobrar_reparacion(
 @app.delete("/reparaciones/{id}")
 def eliminar_reparacion(id: int, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM reparaciones_tiendaone WHERE id = %s", (id,))
+    cur.execute("DELETE FROM reparaciones WHERE id = %s", (id,))
     if cur.rowcount == 0:
         db.rollback()
         raise HTTPException(404, "Reparación no encontrada")
