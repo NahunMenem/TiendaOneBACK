@@ -1209,9 +1209,13 @@ def normalizar(texto: str):
 @app.delete("/reparaciones/{id}")
 def eliminar_reparacion(id: int, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM equipos_tiendaone WHERE id = %s", (id,))
+    cur.execute(
+        "DELETE FROM reparaciones_tiendaone WHERE id = %s",
+        (id,)
+    )
     db.commit()
-    return {"success": True}
+    cur.close()
+    return {"ok": True}
 
 # =====================================================
 # ACTUALIZAR ESTADO DE REPARACIÓN
