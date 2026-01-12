@@ -2065,22 +2065,41 @@ def listar_reparaciones(
 
     if estado:
         cur.execute("""
-            SELECT *
-            FROM reparaciones
+            SELECT
+                id,
+                descripcion        AS reparacion,
+                precio,
+                estado,
+                cobrada,
+                NULL               AS cliente,
+                NULL               AS telefono,
+                NULL               AS equipo,
+                NULL               AS imei
+            FROM reparaciones_tiendaone
             WHERE estado = %s
-            ORDER BY fecha_ingreso DESC
+            ORDER BY created_at DESC
         """, (estado,))
     else:
         cur.execute("""
-            SELECT *
-            FROM reparaciones
-            ORDER BY fecha_ingreso DESC
+            SELECT
+                id,
+                descripcion        AS reparacion,
+                precio,
+                estado,
+                cobrada,
+                NULL               AS cliente,
+                NULL               AS telefono,
+                NULL               AS equipo,
+                NULL               AS imei
+            FROM reparaciones_tiendaone
+            ORDER BY created_at DESC
         """)
 
     rows = cur.fetchall()
     cur.close()
 
     return rows
+
 
 @app.patch("/reparaciones/{id}/estado")
 def cambiar_estado_reparacion(
