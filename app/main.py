@@ -2055,6 +2055,7 @@ def listar_reparaciones(estado: str | None = None, db=Depends(get_db)):
                 cliente,
                 telefono,
                 equipo,
+                dni,
                 imei,
                 descripcion AS reparacion,
                 precio,
