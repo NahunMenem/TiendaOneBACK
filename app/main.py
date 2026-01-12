@@ -1933,29 +1933,36 @@ def exportar_transacciones(
     cur = db.cursor()
 
     desde_dt = datetime.fromisoformat(desde)
-    hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
+    hasta_dt = datetime.fromisoformat(hasta)
 
     # ======================================
-    # EXPORTAR TRANSACCIONES + PAGOS
+    # TRANSACCIONES (VENTA + ITEM + PAGO)
     # ======================================
     cur.execute("""
         SELECT
-            v.fecha,
-            COALESCE(p.nombre, v.nombre_manual) AS producto,
-            v.cantidad,
-            COALESCE(v.precio_unitario, v.precio_manual, 0) AS precio_unitario,
-            v.total AS total_venta,
-            pg.metodo AS metodo_pago,
-            pg.moneda,
-            pg.monto AS monto_pagado,
-            v.tipo_pago,
-            v.tipo_precio,
-            v.dni_cliente
+            v.id                AS venta_id,
+            v.fecha             AS fecha,
+            v.dni_cliente       AS dni_cliente,
+
+            COALESCE(p.nombre, vi.nombre_manual) AS producto,
+            vi.cantidad,
+            vi.precio_unitario,
+            vi.moneda           AS moneda_item,
+            vi.total            AS total_item,
+            vi.tipo_precio,
+
+            pg.metodo           AS metodo_pago,
+            pg.moneda           AS moneda_pago,
+            pg.monto            AS monto_pagado
         FROM ventas_tiendaone v
-        LEFT JOIN productos_tiendaone p ON p.id = v.producto_id
-        JOIN pagos_tiendaone pg ON pg.venta_id = v.id
+        JOIN ventas_items_tiendaone vi
+            ON vi.venta_id = v.id
+        LEFT JOIN productos_tiendaone p
+            ON p.id = vi.producto_id
+        JOIN pagos_tiendaone pg
+            ON pg.venta_id = v.id
         WHERE v.fecha BETWEEN %s AND %s
-        ORDER BY v.fecha DESC
+        ORDER BY v.fecha DESC, v.id
     """, (desde_dt, hasta_dt))
 
     rows = cur.fetchall()
@@ -1969,7 +1976,11 @@ def exportar_transacciones(
     # ======================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Transacciones", index=False)
+        df.to_excel(
+            writer,
+            sheet_name="Transacciones",
+            index=False
+        )
 
     output.seek(0)
 
@@ -1977,7 +1988,8 @@ def exportar_transacciones(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": "attachment; filename=transacciones_detalladas.xlsx"
+            "Content-Disposition":
+                "attachment; filename=transacciones_detalladas.xlsx"
         }
     )
 
