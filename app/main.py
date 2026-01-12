@@ -1997,154 +1997,100 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
 
         estado = data.get("estado", "ingresado")
         if estado not in ESTADOS_VALIDOS:
-            raise HTTPException(
-                status_code=400,
-                detail="Estado inválido"
-            )
+            raise HTTPException(400, "Estado inválido")
 
         cur.execute("""
-            INSERT INTO reparaciones (
-                cliente,
-                dni,
-                telefono,
-                equipo,
-                imei,
-                reparacion,
+            INSERT INTO reparaciones_tiendaone (
+                descripcion,
+                cantidad,
                 precio,
                 estado,
-                fecha_ingreso,
-                fecha_actualizacion
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                cobrada,
+                fecha,
+                created_at
+            )
+            VALUES (%s,%s,%s,%s,%s,NOW(),NOW())
             RETURNING id
         """, (
-            data["cliente"].upper(),
-            data.get("dni"),
-            data.get("telefono"),
-            data["equipo"].upper(),
-            data.get("imei"),
             data["reparacion"],
+            1,
             float(data["precio"]),
             estado,
-            datetime.now(),
-            datetime.now(),
+            False
         ))
 
         reparacion_id = cur.fetchone()["id"]
         db.commit()
         cur.close()
 
-        return {
-            "ok": True,
-            "reparacion_id": reparacion_id
-        }
+        return {"ok": True, "reparacion_id": reparacion_id}
 
     except KeyError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail=f"Falta el campo obligatorio: {e}"
-        )
-
-    except HTTPException:
-        db.rollback()
-        raise
+        raise HTTPException(400, f"Falta el campo obligatorio: {e}")
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+        raise HTTPException(500, str(e))
+
+
 
 @app.get("/reparaciones")
-def listar_reparaciones(
-    estado: str | None = None,
-    db=Depends(get_db)
-):
+def listar_reparaciones(estado: str | None = None, db=Depends(get_db)):
     cur = db.cursor(cursor_factory=DictCursor)
 
+    base_query = """
+        SELECT
+            id,
+            descripcion AS reparacion,
+            precio,
+            estado,
+            cobrada,
+            NULL AS cliente,
+            NULL AS telefono,
+            NULL AS equipo,
+            NULL AS imei
+        FROM reparaciones_tiendaone
+    """
+
     if estado:
-        cur.execute("""
-            SELECT
-                id,
-                descripcion        AS reparacion,
-                precio,
-                estado,
-                cobrada,
-                NULL               AS cliente,
-                NULL               AS telefono,
-                NULL               AS equipo,
-                NULL               AS imei
-            FROM reparaciones_tiendaone
-            WHERE estado = %s
-            ORDER BY created_at DESC
-        """, (estado,))
+        cur.execute(base_query + " WHERE estado = %s ORDER BY created_at DESC", (estado,))
     else:
-        cur.execute("""
-            SELECT
-                id,
-                descripcion        AS reparacion,
-                precio,
-                estado,
-                cobrada,
-                NULL               AS cliente,
-                NULL               AS telefono,
-                NULL               AS equipo,
-                NULL               AS imei
-            FROM reparaciones_tiendaone
-            ORDER BY created_at DESC
-        """)
+        cur.execute(base_query + " ORDER BY created_at DESC")
 
     rows = cur.fetchall()
     cur.close()
-
     return rows
 
 
 @app.patch("/reparaciones/{id}/estado")
-def cambiar_estado_reparacion(
-    id: int,
-    data: dict,
-    db=Depends(get_db)
-):
+def cambiar_estado_reparacion(id: int, data: dict, db=Depends(get_db)):
     estado = data.get("estado")
-
     if estado not in ESTADOS_VALIDOS:
-        raise HTTPException(
-            status_code=400,
-            detail="Estado inválido"
-        )
+        raise HTTPException(400, "Estado inválido")
 
     cur = db.cursor()
     cur.execute("""
-        UPDATE reparaciones
-        SET estado = %s,
-            fecha_actualizacion = NOW()
+        UPDATE reparaciones_tiendaone
+        SET estado = %s
         WHERE id = %s
     """, (estado, id))
 
     if cur.rowcount == 0:
         db.rollback()
-        raise HTTPException(
-            status_code=404,
-            detail="Reparación no encontrada"
-        )
+        raise HTTPException(404, "Reparación no encontrada")
 
     db.commit()
     cur.close()
-
     return {"ok": True}
 
 @app.post("/reparaciones/{id}/cobrar")
 def cobrar_reparacion(id: int, data: dict, db=Depends(get_db)):
     cur = db.cursor(cursor_factory=DictCursor)
 
-    # =========================
-    # Buscar reparación REAL
-    # =========================
     cur.execute("""
         SELECT precio, cobrada
-        FROM reparaciones
+        FROM reparaciones_tiendaone
         WHERE id = %s
     """, (id,))
     rep = cur.fetchone()
@@ -2155,65 +2101,49 @@ def cobrar_reparacion(id: int, data: dict, db=Depends(get_db)):
     if rep["cobrada"]:
         raise HTTPException(400, "La reparación ya fue cobrada")
 
-    # =========================
-    # Validaciones
-    # =========================
     moneda = data.get("moneda", "ARS")
     if moneda not in ("ARS", "USD"):
         raise HTTPException(400, "Moneda inválida")
 
     metodo = data.get("metodo")
     if not metodo:
-        raise HTTPException(400, "Método de pago requerido")
+        raise HTTPException(400, "Método requerido")
 
     monto = float(data.get("monto", 0))
     if monto <= 0:
         raise HTTPException(400, "Monto inválido")
 
-    # =========================
     # Registrar pago (sin venta)
-    # =========================
     cur.execute("""
-        INSERT INTO pagos_tiendaone (
-            venta_id,
-            metodo,
-            moneda,
-            monto
-        ) VALUES (%s,%s,%s,%s)
-    """, (
-        None,        # reparación
-        metodo,
-        moneda,
-        monto
-    ))
+        INSERT INTO pagos_tiendaone (venta_id, metodo, moneda, monto)
+        VALUES (%s,%s,%s,%s)
+    """, (None, metodo, moneda, monto))
 
-    # =========================
-    # Marcar reparación cobrada
-    # =========================
+    # Marcar reparación
     cur.execute("""
-        UPDATE reparaciones
-        SET
-            estado = 'retirado',
+        UPDATE reparaciones_tiendaone
+        SET estado = 'retirado',
             cobrada = TRUE,
-            fecha_actualizacion = NOW()
+            fecha = NOW()
         WHERE id = %s
     """, (id,))
 
     db.commit()
     cur.close()
-
     return {"ok": True}
+
 
 @app.delete("/reparaciones/{id}")
 def eliminar_reparacion(id: int, db=Depends(get_db)):
     cur = db.cursor()
-    cur.execute("DELETE FROM reparaciones WHERE id = %s", (id,))
+    cur.execute("DELETE FROM reparaciones_tiendaone WHERE id = %s", (id,))
     if cur.rowcount == 0:
         db.rollback()
         raise HTTPException(404, "Reparación no encontrada")
     db.commit()
     cur.close()
     return {"ok": True}
+
 
 
 
