@@ -2115,53 +2115,39 @@ def cambiar_estado_reparacion(id: int, data: dict, db=Depends(get_db)):
     cur.close()
     return {"ok": True}
 
-@app.post("/reparaciones/{id}/cobrar")
-def cobrar_reparacion(id: int, data: dict, db=Depends(get_db)):
-    cur = db.cursor(cursor_factory=DictCursor)
+@app.post("/reparaciones/{rep_id}/cobrar")
+def cobrar_reparacion(
+    rep_id: int,
+    data: dict,
+    db=Depends(get_db)
+):
+    cur = db.cursor()
 
-    cur.execute("""
-        SELECT precio, cobrada
-        FROM reparaciones_tiendaone
-        WHERE id = %s
-    """, (id,))
-    rep = cur.fetchone()
-
-    if not rep:
-        raise HTTPException(404, "Reparación no encontrada")
-
-    if rep["cobrada"]:
-        raise HTTPException(400, "La reparación ya fue cobrada")
-
-    moneda = data.get("moneda", "ARS")
-    if moneda not in ("ARS", "USD"):
-        raise HTTPException(400, "Moneda inválida")
-
-    metodo = data.get("metodo")
-    if not metodo:
-        raise HTTPException(400, "Método requerido")
-
-    monto = float(data.get("monto", 0))
-    if monto <= 0:
-        raise HTTPException(400, "Monto inválido")
-
-    # Registrar pago (sin venta)
-    cur.execute("""
-        INSERT INTO pagos_tiendaone (venta_id, metodo, moneda, monto)
-        VALUES (%s,%s,%s,%s)
-    """, (None, metodo, moneda, monto))
-
-    # Marcar reparación
+    # marcar como cobrada y retirada
     cur.execute("""
         UPDATE reparaciones_tiendaone
-        SET estado = 'retirado',
-            cobrada = TRUE,
+        SET cobrada = TRUE,
+            estado = 'retirado',
             fecha = NOW()
         WHERE id = %s
-    """, (id,))
+    """, (rep_id,))
+
+    # registrar pago REAL (impacta dashboard)
+    cur.execute("""
+        INSERT INTO pagos_tiendaone (metodo, moneda, monto, reparacion_id)
+        VALUES (%s, %s, %s, %s)
+    """, (
+        data["metodo"],
+        data["moneda"],
+        data["monto"],
+        rep_id
+    ))
 
     db.commit()
     cur.close()
+
     return {"ok": True}
+
 
 
 @app.delete("/reparaciones/{id}")
