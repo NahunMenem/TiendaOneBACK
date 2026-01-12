@@ -2166,19 +2166,32 @@ def cobrar_reparacion(
 ):
     cur = db.cursor()
 
-    # marcar como cobrada y retirada
+    # 1️⃣ marcar reparación como cobrada / retirada
     cur.execute("""
         UPDATE reparaciones_tiendaone
-        SET cobrada = TRUE,
+        SET
+            cobrada = TRUE,
             estado = 'retirado',
             fecha = NOW()
         WHERE id = %s
     """, (rep_id,))
 
-    # registrar pago REAL (impacta dashboard)
+    # 2️⃣ registrar pago (SIN venta_id)
     cur.execute("""
-        INSERT INTO pagos_tiendaone (metodo, moneda, monto, reparacion_id)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO pagos_tiendaone (
+            venta_id,
+            metodo,
+            moneda,
+            monto,
+            reparacion_id
+        )
+        VALUES (
+            NULL,
+            %s,
+            %s,
+            %s,
+            %s
+        )
     """, (
         data["metodo"],
         data["moneda"],
@@ -2190,6 +2203,7 @@ def cobrar_reparacion(
     cur.close()
 
     return {"ok": True}
+
 
 
 
