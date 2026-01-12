@@ -314,117 +314,136 @@ async def registrar_venta(
     fecha_actual = datetime.now()
 
     try:
+        # =====================================================
+        # 🧾 CREAR UNA SOLA VENTA (CABECERA)
+        # =====================================================
+        cur.execute("""
+            INSERT INTO ventas_tiendaone (
+                fecha,
+                tipo_pago,
+                dni_cliente,
+                total
+            )
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (
+            fecha_actual,
+            "mixto",
+            dni_cliente,
+            0
+        ))
+
+        venta_id = cur.fetchone()[0]
+
+        total_venta = 0
+
+        # =====================================================
+        # 📦 GUARDAR ÍTEMS (PRODUCTOS + MANUALES)
+        # =====================================================
         for item in carrito:
             producto_id = item.get("id")
             cantidad = int(item["cantidad"])
             tipo_precio = item.get("tipo_precio") or "venta"
 
-            # =====================================================
-            # 👉 VENTA MANUAL
-            # =====================================================
+            # ---------- VENTA MANUAL ----------
             if producto_id is None:
                 nombre_manual = item["nombre"]
-                precio_manual = float(item["precio"])
+                precio = float(item["precio"])
                 moneda = item.get("moneda", "ARS")
-                total = precio_manual * cantidad
+
+                total = precio * cantidad
+                total_venta += total
 
                 cur.execute("""
-                    INSERT INTO ventas_tiendaone (
+                    INSERT INTO ventas_items_tiendaone (
+                        venta_id,
                         producto_id,
-                        cantidad,
-                        fecha,
                         nombre_manual,
-                        precio_manual,
-                        moneda,
-                        tipo_pago,
-                        dni_cliente,
-                        total,
-                        tipo_precio
-                    )
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    RETURNING id
-                """, (
-                    None,
-                    cantidad,
-                    fecha_actual,
-                    nombre_manual,
-                    precio_manual,
-                    moneda,
-                    "mixto",
-                    dni_cliente,
-                    total,
-                    tipo_precio
-                ))
-
-                # 🔑 LEER ID INMEDIATAMENTE
-                venta_id = cur.fetchone()[0]
-
-            # =====================================================
-            # 👉 PRODUCTO NORMAL
-            # =====================================================
-            else:
-                precio_unitario = float(item["precio"])
-                moneda = item["moneda"]
-                total = precio_unitario * cantidad
-
-                cur.execute("""
-                    INSERT INTO ventas_tiendaone (
-                        producto_id,
                         cantidad,
-                        fecha,
                         precio_unitario,
                         moneda,
-                        tipo_pago,
-                        dni_cliente,
-                        total,
-                        tipo_precio
+                        tipo_precio,
+                        total
                     )
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    RETURNING id
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                 """, (
-                    producto_id,
+                    venta_id,
+                    None,
+                    nombre_manual,
                     cantidad,
-                    fecha_actual,
-                    precio_unitario,
+                    precio,
                     moneda,
-                    "mixto",
-                    dni_cliente,
-                    total,
-                    tipo_precio
+                    tipo_precio,
+                    total
                 ))
 
-                # 🔑 LEER ID ANTES DE CUALQUIER OTRO EXECUTE
-                venta_id = cur.fetchone()[0]
+            # ---------- PRODUCTO NORMAL ----------
+            else:
+                precio = float(item["precio"])
+                moneda = item["moneda"]
 
-                # 🔥 DESCONTAR STOCK (DESPUÉS)
+                total = precio * cantidad
+                total_venta += total
+
+                cur.execute("""
+                    INSERT INTO ventas_items_tiendaone (
+                        venta_id,
+                        producto_id,
+                        cantidad,
+                        precio_unitario,
+                        moneda,
+                        tipo_precio,
+                        total
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    venta_id,
+                    producto_id,
+                    cantidad,
+                    precio,
+                    moneda,
+                    tipo_precio,
+                    total
+                ))
+
+                # 🔥 DESCONTAR STOCK
                 cur.execute("""
                     UPDATE productos_tiendaone
                     SET stock = stock - %s
                     WHERE id = %s
                 """, (cantidad, producto_id))
 
-            # =====================================================
-            # 💳 GUARDAR PAGOS
-            # =====================================================
-            for p in pagos:
-                cur.execute("""
-                    INSERT INTO pagos_tiendaone (
-                        venta_id,
-                        metodo,
-                        moneda,
-                        monto
-                    )
-                    VALUES (%s,%s,%s,%s)
-                """, (
+        # =====================================================
+        # 💳 GUARDAR PAGOS (UNA SOLA VEZ)
+        # =====================================================
+        for p in pagos:
+            cur.execute("""
+                INSERT INTO pagos_tiendaone (
                     venta_id,
-                    p["metodo"],
-                    p["moneda"],
-                    float(p["monto"])
-                ))
+                    metodo,
+                    moneda,
+                    monto
+                )
+                VALUES (%s,%s,%s,%s)
+            """, (
+                venta_id,
+                p["metodo"],
+                p["moneda"],
+                float(p["monto"])
+            ))
+
+        # =====================================================
+        # 💰 ACTUALIZAR TOTAL DE LA VENTA
+        # =====================================================
+        cur.execute("""
+            UPDATE ventas_tiendaone
+            SET total = %s
+            WHERE id = %s
+        """, (total_venta, venta_id))
 
         db.commit()
         request.session["carrito"] = []
-        return {"ok": True}
+        return {"ok": True, "venta_id": venta_id}
 
     except Exception as e:
         db.rollback()
@@ -433,7 +452,6 @@ async def registrar_venta(
 
     finally:
         cur.close()
-
 
 
 
@@ -1815,64 +1833,60 @@ def listar_transacciones(
     cur = db.cursor()
 
     desde_dt = datetime.fromisoformat(desde)
-    hasta_dt = datetime.fromisoformat(hasta) + timedelta(days=1)
+    hasta_dt = datetime.fromisoformat(hasta)
 
     # =========================
-    # VENTAS CON PRODUCTO
-    # =========================
-    cur.execute("""
-        SELECT
-            v.id,
-            v.fecha,
-            p.nombre AS producto,
-            p.num,
-            v.cantidad,
-            COALESCE(v.precio_unitario, 0),
-            COALESCE(v.total, 0),
-            p.moneda,
-            v.tipo_pago,
-            v.dni_cliente,
-            v.tipo_precio
-        FROM ventas_tiendaone v
-        JOIN productos_tiendaone p ON p.id = v.producto_id
-        WHERE v.producto_id IS NOT NULL
-          AND v.fecha BETWEEN %s AND %s
-        ORDER BY v.fecha DESC
-    """, (desde_dt, hasta_dt))
-
-    ventas_raw = cur.fetchall()
-
-    # =========================
-    # VENTAS MANUALES
+    # VENTAS (CABECERA)
     # =========================
     cur.execute("""
         SELECT
             id,
             fecha,
-            nombre_manual AS producto,
-            '-' AS num,
-            cantidad,
-            COALESCE(precio_manual, 0),
-            COALESCE(total, 0),
-            moneda,
-            tipo_pago,
             dni_cliente,
-            tipo_precio
+            total
         FROM ventas_tiendaone
-        WHERE producto_id IS NULL
-          AND fecha BETWEEN %s AND %s
+        WHERE fecha BETWEEN %s AND %s
         ORDER BY fecha DESC
     """, (desde_dt, hasta_dt))
 
-    manuales_raw = cur.fetchall()
+    ventas_raw = cur.fetchall()
 
-    # =========================
-    # ARMAR RESPUESTA CON PAGOS
-    # =========================
-    def armar_venta(r):
-        venta_id = r[0]
+    ventas = []
 
-        # 👇 ACÁ ESTABA EL ERROR
+    for v in ventas_raw:
+        venta_id = v[0]
+
+        # =========================
+        # ITEMS DE LA VENTA
+        # =========================
+        cur.execute("""
+            SELECT
+                COALESCE(p.nombre, vi.nombre_manual) AS producto,
+                vi.cantidad,
+                vi.precio_unitario,
+                vi.moneda,
+                vi.total,
+                vi.tipo_precio
+            FROM ventas_items_tiendaone vi
+            LEFT JOIN productos_tiendaone p ON p.id = vi.producto_id
+            WHERE vi.venta_id = %s
+        """, (venta_id,))
+
+        items = [
+            {
+                "producto": r[0],
+                "cantidad": r[1],
+                "precio_unitario": float(r[2]),
+                "moneda": r[3],
+                "total": float(r[4]),
+                "tipo_precio": r[5],
+            }
+            for r in cur.fetchall()
+        ]
+
+        # =========================
+        # PAGOS DE LA VENTA
+        # =========================
         cur.execute("""
             SELECT metodo, moneda, monto
             FROM pagos_tiendaone
@@ -1883,35 +1897,23 @@ def listar_transacciones(
             {
                 "metodo": p[0],
                 "moneda": p[1],
-                "monto": float(p[2])
+                "monto": float(p[2]),
             }
             for p in cur.fetchall()
         ]
 
-        return {
-            "id": r[0],
-            "fecha": r[1],
-            "producto": r[2],
-            "num": r[3],
-            "cantidad": r[4],
-            "precio_unitario": float(r[5]),
-            "total": float(r[6]),
-            "moneda": r[7],
-            "tipo_pago": r[8],
-            "dni_cliente": r[9],
-            "tipo_precio": r[10],
+        ventas.append({
+            "id": venta_id,
+            "fecha": v[1],
+            "dni_cliente": v[2],
+            "total": float(v[3]),
+            "items": items,
             "pagos": pagos,
-        }
-
-    ventas = [armar_venta(r) for r in ventas_raw]
-    manuales = [armar_venta(r) for r in manuales_raw]
+        })
 
     cur.close()
 
-    return {
-        "ventas": ventas,
-        "manuales": manuales
-    }
+    return ventas
 
 
 
