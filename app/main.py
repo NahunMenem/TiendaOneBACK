@@ -1995,16 +1995,9 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
     try:
         cur = db.cursor(cursor_factory=DictCursor)
 
-        estado = data.get("estado") or "ingresado"
+        estado = data.get("estado", "ingresado")
         if estado not in ESTADOS_VALIDOS:
             raise HTTPException(400, "Estado inválido")
-
-        # VALIDACIONES CLARAS
-        if not data.get("reparacion"):
-            raise HTTPException(400, "Falta descripción de reparación")
-
-        if not data.get("precio"):
-            raise HTTPException(400, "Falta precio")
 
         cur.execute("""
             INSERT INTO reparaciones_tiendaone (
@@ -2013,31 +2006,31 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
                 precio,
                 estado,
                 cobrada,
+                cliente,
+                telefono,
+                equipo,
+                imei,
                 fecha,
                 created_at
-            )
-            VALUES (%s,%s,%s,%s,%s,NOW(),NOW())
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
             RETURNING id
         """, (
             data["reparacion"],
             1,
             float(data["precio"]),
             estado,
-            False
+            False,
+            data["cliente"],
+            data.get("telefono"),
+            data["equipo"],
+            data.get("imei"),
         ))
 
         reparacion_id = cur.fetchone()["id"]
         db.commit()
         cur.close()
 
-        return {
-            "ok": True,
-            "reparacion_id": reparacion_id
-        }
-
-    except HTTPException:
-        db.rollback()
-        raise
+        return {"ok": True, "id": reparacion_id}
 
     except Exception as e:
         db.rollback()
@@ -2050,28 +2043,42 @@ def crear_reparacion(data: dict, db=Depends(get_db)):
 def listar_reparaciones(estado: str | None = None, db=Depends(get_db)):
     cur = db.cursor(cursor_factory=DictCursor)
 
-    base_query = """
-        SELECT
-            id,
-            descripcion AS reparacion,
-            precio,
-            estado,
-            cobrada,
-            NULL AS cliente,
-            NULL AS telefono,
-            NULL AS equipo,
-            NULL AS imei
-        FROM reparaciones_tiendaone
-    """
-
     if estado:
-        cur.execute(base_query + " WHERE estado = %s ORDER BY created_at DESC", (estado,))
+        cur.execute("""
+            SELECT
+                id,
+                cliente,
+                telefono,
+                equipo,
+                imei,
+                descripcion AS reparacion,
+                precio,
+                estado,
+                cobrada
+            FROM reparaciones_tiendaone
+            WHERE estado = %s
+            ORDER BY created_at DESC
+        """, (estado,))
     else:
-        cur.execute(base_query + " ORDER BY created_at DESC")
+        cur.execute("""
+            SELECT
+                id,
+                cliente,
+                telefono,
+                equipo,
+                imei,
+                descripcion AS reparacion,
+                precio,
+                estado,
+                cobrada
+            FROM reparaciones_tiendaone
+            ORDER BY created_at DESC
+        """)
 
     rows = cur.fetchall()
     cur.close()
     return rows
+
 
 
 @app.patch("/reparaciones/{id}/estado")
