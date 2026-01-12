@@ -2159,14 +2159,9 @@ def cambiar_estado_reparacion(id: int, data: dict, db=Depends(get_db)):
     return {"ok": True}
 
 @app.post("/reparaciones/{rep_id}/cobrar")
-def cobrar_reparacion(
-    rep_id: int,
-    data: dict,
-    db=Depends(get_db)
-):
+def cobrar_reparacion(rep_id: int, data: dict, db=Depends(get_db)):
     cur = db.cursor()
 
-    # 1️⃣ marcar reparación como cobrada / retirada
     cur.execute("""
         UPDATE reparaciones_tiendaone
         SET
@@ -2176,7 +2171,6 @@ def cobrar_reparacion(
         WHERE id = %s
     """, (rep_id,))
 
-    # 2️⃣ registrar pago (SIN venta_id)
     cur.execute("""
         INSERT INTO pagos_tiendaone (
             venta_id,
@@ -2203,6 +2197,7 @@ def cobrar_reparacion(
     cur.close()
 
     return {"ok": True}
+
 
 
 
