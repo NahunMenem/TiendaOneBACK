@@ -951,14 +951,15 @@ def dashboard(
     total_egresos = float(cur.fetchone()["total"] or 0)
 
     # =====================================================
-    # 📦 COSTO DE PRODUCTOS (POR MONEDA)
+    # 📦 COSTO DE PRODUCTOS VENDIDOS (POR MONEDA) ✅ CORRECTO
     # =====================================================
     cur.execute("""
         SELECT
             p.moneda,
-            SUM(v.cantidad * p.precio_costo) AS total
-        FROM ventas_tiendaone v
-        JOIN productos_tiendaone p ON v.producto_id = p.id
+            SUM(vi.cantidad * p.precio_costo) AS total
+        FROM ventas_items_tiendaone vi
+        JOIN ventas_tiendaone v ON v.id = vi.venta_id
+        JOIN productos_tiendaone p ON p.id = vi.producto_id
         WHERE DATE(v.fecha) BETWEEN %s AND %s
         GROUP BY p.moneda
     """, (fecha_desde, fecha_hasta))
@@ -1022,6 +1023,7 @@ def dashboard(
         "costo_por_moneda": costo_por_moneda,
         "ganancia_por_moneda": ganancia_por_moneda
     }
+
 
 
 
