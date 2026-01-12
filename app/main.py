@@ -39,16 +39,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Backend SJ")
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",                 # desarrollo
-        "https://tienda-one-ten.vercel.app",     # producción
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://tiendaone.vercel.app",  # si después deployás el front
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 
