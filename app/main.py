@@ -1914,6 +1914,12 @@ from datetime import datetime
 from io import BytesIO
 import pandas as pd
 
+from fastapi import Depends
+from fastapi.responses import StreamingResponse
+from datetime import datetime
+from io import BytesIO
+import pandas as pd
+
 @app.get("/transacciones/exportar")
 def exportar_transacciones(
     desde: str,
@@ -1963,7 +1969,7 @@ def exportar_transacciones(
     """, (desde_dt, hasta_dt))
 
     ventas_rows = cur.fetchall()
-    ventas_cols = [c.name for c in cur.description]
+    ventas_cols = [c[0] for c in cur.description]
     df_ventas = pd.DataFrame(ventas_rows, columns=ventas_cols)
 
     # =====================================================
@@ -1986,13 +1992,12 @@ def exportar_transacciones(
         LEFT JOIN pagos_reparaciones pr
             ON pr.reparacion_id = r.id
         WHERE r.fecha BETWEEN %s AND %s
-        GROUP BY
-            r.id, r.fecha, r.cliente, r.equipo, r.reparacion, r.total
+        GROUP BY r.id, r.fecha, r.cliente, r.equipo, r.reparacion, r.total
         ORDER BY r.fecha DESC, r.id
     """, (desde_dt, hasta_dt))
 
     rep_rows = cur.fetchall()
-    rep_cols = [c.name for c in cur.description]
+    rep_cols = [c[0] for c in cur.description]
     df_reparaciones = pd.DataFrame(rep_rows, columns=rep_cols)
 
     cur.close()
