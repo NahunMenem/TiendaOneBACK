@@ -1926,7 +1926,7 @@ def exportar_transacciones(
     hasta_dt = datetime.fromisoformat(hasta)
 
     # =====================================================
-    # 🛒 VENTAS (MISMO FILTRO QUE LA PANTALLA)
+    # 🛒 VENTAS
     # =====================================================
     cur.execute("""
         SELECT
@@ -1942,7 +1942,7 @@ def exportar_transacciones(
             vi.tipo_precio,
 
             string_agg(
-                pg.metodo || ' ' || pg.moneda || ' ' || pg.monto,
+                pg.metodo || ' ' || pg.moneda || ' ' || pg.monto::text,
                 ' | '
             ) AS pagos
         FROM ventas_tiendaone v
@@ -1979,14 +1979,15 @@ def exportar_transacciones(
             r.total,
 
             string_agg(
-                pr.metodo || ' ' || pr.moneda || ' ' || pr.monto,
+                pr.metodo || ' ' || pr.moneda || ' ' || pr.monto::text,
                 ' | '
             ) AS pagos
         FROM reparaciones r
         LEFT JOIN pagos_reparaciones pr
             ON pr.reparacion_id = r.id
         WHERE r.fecha BETWEEN %s AND %s
-        GROUP BY r.id, r.fecha, r.cliente, r.equipo, r.reparacion, r.total
+        GROUP BY
+            r.id, r.fecha, r.cliente, r.equipo, r.reparacion, r.total
         ORDER BY r.fecha DESC, r.id
     """, (desde_dt, hasta_dt))
 
@@ -1997,20 +1998,12 @@ def exportar_transacciones(
     cur.close()
 
     # =====================================================
-    # 📤 EXPORTAR EXCEL (2 HOJAS)
+    # 📤 EXPORTAR EXCEL
     # =====================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_ventas.to_excel(
-            writer,
-            sheet_name="Ventas",
-            index=False
-        )
-        df_reparaciones.to_excel(
-            writer,
-            sheet_name="Reparaciones",
-            index=False
-        )
+        df_ventas.to_excel(writer, sheet_name="Ventas", index=False)
+        df_reparaciones.to_excel(writer, sheet_name="Reparaciones", index=False)
 
     output.seek(0)
 
