@@ -1908,6 +1908,12 @@ import pandas as pd
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 
+from fastapi import Depends
+from fastapi.responses import StreamingResponse
+from datetime import datetime
+from io import BytesIO
+import pandas as pd
+
 @app.get("/transacciones/exportar")
 def exportar_transacciones(
     desde: str,
@@ -1919,50 +1925,90 @@ def exportar_transacciones(
     desde_dt = datetime.fromisoformat(desde)
     hasta_dt = datetime.fromisoformat(hasta)
 
-    # ======================================
-    # TRANSACCIONES (VENTA + ITEM + PAGO)
-    # ======================================
+    # =====================================================
+    # 🛒 VENTAS (MISMO FILTRO QUE LA PANTALLA)
+    # =====================================================
     cur.execute("""
         SELECT
-            v.id                AS venta_id,
-            v.fecha             AS fecha,
-            v.dni_cliente       AS dni_cliente,
+            v.id AS venta_id,
+            v.fecha,
+            v.dni_cliente,
 
             COALESCE(p.nombre, vi.nombre_manual) AS producto,
             vi.cantidad,
             vi.precio_unitario,
-            vi.moneda           AS moneda_item,
-            vi.total            AS total_item,
+            vi.moneda AS moneda_item,
+            vi.total AS total_item,
             vi.tipo_precio,
 
-            pg.metodo           AS metodo_pago,
-            pg.moneda           AS moneda_pago,
-            pg.monto            AS monto_pagado
+            string_agg(
+                pg.metodo || ' ' || pg.moneda || ' ' || pg.monto,
+                ' | '
+            ) AS pagos
         FROM ventas_tiendaone v
         JOIN ventas_items_tiendaone vi
             ON vi.venta_id = v.id
         LEFT JOIN productos_tiendaone p
             ON p.id = vi.producto_id
-        JOIN pagos_tiendaone pg
+        LEFT JOIN pagos_tiendaone pg
             ON pg.venta_id = v.id
         WHERE v.fecha BETWEEN %s AND %s
+          AND v.anulada = false
+        GROUP BY
+            v.id, v.fecha, v.dni_cliente,
+            p.nombre, vi.nombre_manual,
+            vi.cantidad, vi.precio_unitario,
+            vi.moneda, vi.total, vi.tipo_precio
         ORDER BY v.fecha DESC, v.id
     """, (desde_dt, hasta_dt))
 
-    rows = cur.fetchall()
-    columns = [c.name for c in cur.description]
-    df = pd.DataFrame(rows, columns=columns)
+    ventas_rows = cur.fetchall()
+    ventas_cols = [c.name for c in cur.description]
+    df_ventas = pd.DataFrame(ventas_rows, columns=ventas_cols)
+
+    # =====================================================
+    # 🔧 REPARACIONES
+    # =====================================================
+    cur.execute("""
+        SELECT
+            r.id AS reparacion_id,
+            r.fecha,
+            r.cliente,
+            r.equipo,
+            r.reparacion,
+            r.total,
+
+            string_agg(
+                pr.metodo || ' ' || pr.moneda || ' ' || pr.monto,
+                ' | '
+            ) AS pagos
+        FROM reparaciones r
+        LEFT JOIN pagos_reparaciones pr
+            ON pr.reparacion_id = r.id
+        WHERE r.fecha BETWEEN %s AND %s
+        GROUP BY r.id, r.fecha, r.cliente, r.equipo, r.reparacion, r.total
+        ORDER BY r.fecha DESC, r.id
+    """, (desde_dt, hasta_dt))
+
+    rep_rows = cur.fetchall()
+    rep_cols = [c.name for c in cur.description]
+    df_reparaciones = pd.DataFrame(rep_rows, columns=rep_cols)
 
     cur.close()
 
-    # ======================================
-    # EXPORTAR A EXCEL
-    # ======================================
+    # =====================================================
+    # 📤 EXPORTAR EXCEL (2 HOJAS)
+    # =====================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(
+        df_ventas.to_excel(
             writer,
-            sheet_name="Transacciones",
+            sheet_name="Ventas",
+            index=False
+        )
+        df_reparaciones.to_excel(
+            writer,
+            sheet_name="Reparaciones",
             index=False
         )
 
