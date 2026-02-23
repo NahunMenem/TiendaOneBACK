@@ -1947,10 +1947,14 @@ def exportar_transacciones(
             vi.total AS total_item,
             vi.tipo_precio,
 
-            string_agg(
-                pg.metodo || ' ' || pg.moneda || ' ' || pg.monto::text,
-                ' | '
+            COALESCE(
+                string_agg(
+                    CONCAT(pg.metodo, ' ', pg.moneda, ' ', pg.monto),
+                    ' | '
+                ),
+                ''
             ) AS pagos
+
         FROM ventas_tiendaone v
         JOIN ventas_items_tiendaone vi
             ON vi.venta_id = v.id
@@ -1958,13 +1962,16 @@ def exportar_transacciones(
             ON p.id = vi.producto_id
         LEFT JOIN pagos_tiendaone pg
             ON pg.venta_id = v.id
+
         WHERE v.fecha BETWEEN %s AND %s
           AND v.anulada = false
+
         GROUP BY
             v.id, v.fecha, v.dni_cliente,
             p.nombre, vi.nombre_manual,
             vi.cantidad, vi.precio_unitario,
             vi.moneda, vi.total, vi.tipo_precio
+
         ORDER BY v.fecha DESC, v.id
     """, (desde_dt, hasta_dt))
 
@@ -1973,7 +1980,7 @@ def exportar_transacciones(
     df_ventas = pd.DataFrame(ventas_rows, columns=ventas_cols)
 
     # =====================================================
-    # 🔧 REPARACIONES
+    # 🔧 REPARACIONES (TABLAS CORRECTAS)
     # =====================================================
     cur.execute("""
         SELECT
@@ -1981,18 +1988,27 @@ def exportar_transacciones(
             r.fecha,
             r.cliente,
             r.equipo,
-            r.reparacion,
+            r.descripcion,
             r.total,
 
-            string_agg(
-                pr.metodo || ' ' || pr.moneda || ' ' || pr.monto::text,
-                ' | '
+            COALESCE(
+                string_agg(
+                    CONCAT(p.metodo, ' ', p.moneda, ' ', p.monto),
+                    ' | '
+                ),
+                ''
             ) AS pagos
-        FROM reparaciones r
-        LEFT JOIN pagos_reparaciones pr
-            ON pr.reparacion_id = r.id
+
+        FROM reparaciones_tiendaone r
+        LEFT JOIN pagos_tiendaone p
+            ON p.reparacion_id = r.id
+
         WHERE r.fecha BETWEEN %s AND %s
-        GROUP BY r.id, r.fecha, r.cliente, r.equipo, r.reparacion, r.total
+
+        GROUP BY
+            r.id, r.fecha, r.cliente,
+            r.equipo, r.descripcion, r.total
+
         ORDER BY r.fecha DESC, r.id
     """, (desde_dt, hasta_dt))
 
@@ -2020,7 +2036,6 @@ def exportar_transacciones(
                 "attachment; filename=transacciones_detalladas.xlsx"
         }
     )
-
 
 
 from fastapi import HTTPException
