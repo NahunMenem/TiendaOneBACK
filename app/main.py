@@ -1939,14 +1939,14 @@ def exportar_transacciones(
             v.id AS venta_id,
             v.fecha,
             v.dni_cliente,
-
+    
             COALESCE(p.nombre, vi.nombre_manual) AS producto,
             vi.cantidad,
             vi.precio_unitario,
             vi.moneda AS moneda_item,
             vi.total AS total_item,
             vi.tipo_precio,
-
+    
             COALESCE(
                 string_agg(
                     CONCAT(pg.metodo, ' ', pg.moneda, ' ', pg.monto),
@@ -1954,7 +1954,7 @@ def exportar_transacciones(
                 ),
                 ''
             ) AS pagos
-
+    
         FROM ventas_tiendaone v
         JOIN ventas_items_tiendaone vi
             ON vi.venta_id = v.id
@@ -1962,16 +1962,15 @@ def exportar_transacciones(
             ON p.id = vi.producto_id
         LEFT JOIN pagos_tiendaone pg
             ON pg.venta_id = v.id
-
+    
         WHERE v.fecha BETWEEN %s AND %s
-          AND v.anulada = false
-
+    
         GROUP BY
             v.id, v.fecha, v.dni_cliente,
             p.nombre, vi.nombre_manual,
             vi.cantidad, vi.precio_unitario,
             vi.moneda, vi.total, vi.tipo_precio
-
+    
         ORDER BY v.fecha DESC, v.id
     """, (desde_dt, hasta_dt))
 
