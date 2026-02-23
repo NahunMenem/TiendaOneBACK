@@ -1988,8 +1988,9 @@ def exportar_transacciones(
             r.cliente,
             r.equipo,
             r.descripcion,
-            r.total,
-
+    
+            COALESCE(SUM(p.monto), 0) AS total,
+    
             COALESCE(
                 string_agg(
                     CONCAT(p.metodo, ' ', p.moneda, ' ', p.monto),
@@ -1997,17 +1998,17 @@ def exportar_transacciones(
                 ),
                 ''
             ) AS pagos
-
+    
         FROM reparaciones_tiendaone r
         LEFT JOIN pagos_tiendaone p
             ON p.reparacion_id = r.id
-
+    
         WHERE r.fecha BETWEEN %s AND %s
-
+    
         GROUP BY
             r.id, r.fecha, r.cliente,
-            r.equipo, r.descripcion, r.total
-
+            r.equipo, r.descripcion
+    
         ORDER BY r.fecha DESC, r.id
     """, (desde_dt, hasta_dt))
 
